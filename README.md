@@ -69,8 +69,6 @@ modalin-be/
 
 ## Menjalankan dengan Docker Compose
 
-Jika Anda ingin menjalankan backend beserta database PostgreSQL secara otomatis tanpa perlu menginstalnya secara lokal di sistem operasi Anda:
-
 1. **Jalankan Container**:
    ```bash
    docker compose up -d --build
