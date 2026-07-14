@@ -80,3 +80,21 @@ modalin-be/
    docker compose down
    ```
    *Data database Anda akan tetap tersimpan secara aman di volume lokal `postgres_data`.*
+
+---
+
+## Alur Kerja Git Branching (Git Workflow)
+
+1. **Daftar Branch Utama**:
+   - `main` : Branch rilis untuk lingkungan Produksi (*Production*).
+   - `staging` : Branch rilis untuk lingkungan Pra-Produksi (*Staging/Testing*).
+   - `dev` : Branch utama pengembangan (*Development*). Semua integrasi fitur baru disatukan di sini.
+
+2. **Aturan Pembuatan Branch**:
+   - Seluruh pengerjaan fitur baru atau perbaikan bug **wajib** dibuat dari branch **`dev`**.
+   - Gunakan format penamaan branch berikut:
+     - Fitur Baru: **`feat/nama-fitur`** (contoh: `feat/auth-jwt`)
+     - Perbaikan Bug/Fixing: **`fix/deskripsi-error`** (contoh: `fix/missing-env-port`)
+
+3. **Alur Penggabungan (Merge)**:
+   - Setelah pengerjaan di branch `feat/` atau `fix/` selesai dan teruji, gabungkan kembali (**merge**) hasil pekerjaan tersebut ke branch **`dev`**.
