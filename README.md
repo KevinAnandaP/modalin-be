@@ -26,7 +26,10 @@ modalin-be/
 │   ├── config/           # Helper loader konfigurasi
 │   ├── database/         # Helper koneksi database GORM
 │   └── utils/            # Utilitas validator dll
+├── .dockerignore         # Docker ignore
 ├── .gitignore            # Git ignore
+├── Dockerfile            # Konfigurasi container image backend
+├── docker-compose.yml    # Orkestrasi backend & PostgreSQL
 ├── go.mod
 └── go.sum
 ```
@@ -61,3 +64,21 @@ modalin-be/
    - *Benar*: `GET /api/v1/users`, `POST /api/v1/investments`
    - *Salah*: `GET /users`, `POST /investments`
 2. **Pengecualian**: Hanya endpoint utilitas sistem global (seperti root homepage `/` dan load-balancer health check `/health`) yang diperbolehkan berada di luar prefix `/api/v1`.
+
+---
+
+## Menjalankan dengan Docker Compose
+
+Jika Anda ingin menjalankan backend beserta database PostgreSQL secara otomatis tanpa perlu menginstalnya secara lokal di sistem operasi Anda:
+
+1. **Jalankan Container**:
+   ```bash
+   docker compose up -d --build
+   ```
+   *Perintah ini akan membangun image backend Go, mengunduh database PostgreSQL, dan menghubungkan keduanya secara otomatis.*
+
+2. **Matikan Container**:
+   ```bash
+   docker compose down
+   ```
+   *Data database Anda akan tetap tersimpan secara aman di volume lokal `postgres_data`.*

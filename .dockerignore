@@ -1,0 +1,14 @@
+.git
+.gitignore
+README.md
+Dockerfile
+docker-compose.yml
+configs/.env
+*.exe
+*.dll
+*.so
+*.dylib
+bin/
+vendor/
+.vscode
+.idea
