@@ -1,0 +1,42 @@
+package main
+
+import (
+	"log"
+
+	"modalin-be/internal/router"
+	"modalin-be/pkg/config"
+	"modalin-be/pkg/database"
+
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/gofiber/fiber/v2/middleware/logger"
+	"github.com/gofiber/fiber/v2/middleware/recover"
+)
+
+func main() {
+	// 1. Load Configurations
+	config.LoadConfig()
+
+	// 2. Connect Database
+	database.ConnectDB()
+
+	// 3. Initialize Fiber Application
+	app := fiber.New(fiber.Config{
+		AppName: "Modalin Backend API v1.0",
+	})
+
+	// 4. Middlewares
+	app.Use(logger.New())  // Request logging
+	app.Use(recover.New()) // Panic recovery
+	app.Use(cors.New())    // CORS configuration (crucial for Vue frontend)
+
+	// 5. Setup Routes
+	router.SetupRoutes(app)
+
+	// 6. Start Server
+	port := config.AppConfig.Port
+	log.Printf("Server starting on port %s...", port)
+	if err := app.Listen(":" + port); err != nil {
+		log.Fatalf("Failed to start server: %v", err)
+	}
+}
