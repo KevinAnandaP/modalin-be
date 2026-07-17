@@ -5,6 +5,7 @@ import (
 	"log"
 	"time"
 
+	"modalin-be/internal/model"
 	"modalin-be/pkg/config"
 
 	"gorm.io/driver/postgres"
@@ -45,5 +46,44 @@ func ConnectDB() {
 	sqlDB.SetConnMaxLifetime(time.Hour)
 
 	log.Println("Database connection successfully established!")
+
+	// Run AutoMigrate for all 24 tables
+	log.Println("Running database migrations...")
+	err = db.AutoMigrate(
+		&model.User{},
+		&model.Role{},
+		&model.UserRole{},
+		&model.BusinessCategory{},
+		&model.Business{},
+		&model.FinancialRecord{},
+		&model.FinancialRecordProof{},
+		&model.VerificationRequest{},
+		&model.VerificationReport{},
+		&model.CommunityVote{},
+		&model.LoanCampaign{},
+		&model.CampaignBudgetItem{},
+		&model.CampaignMilestone{},
+		&model.Funding{},
+		&model.Disbursement{},
+		&model.FundUsageProof{},
+		&model.RevenueReport{},
+		&model.RevenueReportProof{},
+		&model.RepaymentSchedule{},
+		&model.Repayment{},
+		&model.LenderReturnDistribution{},
+		&model.RiskAssessment{},
+		&model.Dispute{},
+		&model.AuditLog{},
+		&model.StarterBusinessDetail{},
+		&model.RepaymentRestructuringRequest{},
+	)
+	if err != nil {
+		log.Fatalf("Failed to run database migrations: %v", err)
+	}
+	log.Println("Database migrations completed successfully!")
+
+	// Run Master Data Seeder
+	SeedData(db)
+
 	DB = db
 }
