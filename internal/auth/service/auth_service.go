@@ -94,6 +94,9 @@ func (s *AuthService) Profile(ctx context.Context, id uuid.UUID) (*Profile, erro
 	if err != nil {
 		return nil, err
 	}
+	if user.Status != "active" {
+		return nil, ErrUserInactive
+	}
 	roles, err := s.repo.GetApprovedRoles(ctx, id)
 	if err != nil {
 		return nil, err
@@ -102,6 +105,13 @@ func (s *AuthService) Profile(ctx context.Context, id uuid.UUID) (*Profile, erro
 }
 
 func (s *AuthService) RequestRole(ctx context.Context, userID uuid.UUID, roleName string) (*model.RoleRequest, error) {
+	user, err := s.repo.FindUserByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if user.Status != "active" {
+		return nil, ErrUserInactive
+	}
 	roleName = strings.ToLower(strings.TrimSpace(roleName))
 	if roleName == "admin" || (roleName != "borrower" && roleName != "lender" && roleName != "verifier") {
 		return nil, ErrInvalidRole

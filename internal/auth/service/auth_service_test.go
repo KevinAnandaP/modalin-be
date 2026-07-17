@@ -115,17 +115,18 @@ func TestLoginIssuesTokenWithApprovedRoles(t *testing.T) {
 }
 
 func TestRequestRoleRejectsAdmin(t *testing.T) {
-	svc := service.NewAuthService(&fakeRepository{}, "test-secret")
-	_, err := svc.RequestRole(context.Background(), uuid.New(), "admin")
+	user := &model.User{ID: uuid.New(), Status: "active"}
+	svc := service.NewAuthService(&fakeRepository{user: user}, "test-secret")
+	_, err := svc.RequestRole(context.Background(), user.ID, "admin")
 	if !errors.Is(err, service.ErrInvalidRole) {
 		t.Fatalf("expected ErrInvalidRole, got %v", err)
 	}
 }
 
 func TestRequestRoleCreatesBorrowerRequest(t *testing.T) {
-	repo := &fakeRepository{role: &model.Role{ID: 1, Name: "borrower"}}
+	repo := &fakeRepository{user: &model.User{ID: uuid.New(), Status: "active"}, role: &model.Role{ID: 1, Name: "borrower"}}
 	svc := service.NewAuthService(repo, "test-secret")
-	userID := uuid.New()
+	userID := repo.user.ID
 	request, err := svc.RequestRole(context.Background(), userID, " borrower ")
 	if err != nil {
 		t.Fatal(err)
@@ -136,15 +137,25 @@ func TestRequestRoleCreatesBorrowerRequest(t *testing.T) {
 }
 
 func TestRequestRoleRejectsOpenDuplicate(t *testing.T) {
-	svc := service.NewAuthService(&fakeRepository{role: &model.Role{ID: 1}, openRoleRequest: true}, "test-secret")
-	_, err := svc.RequestRole(context.Background(), uuid.New(), "borrower")
+	user := &model.User{ID: uuid.New(), Status: "active"}
+	svc := service.NewAuthService(&fakeRepository{user: user, role: &model.Role{ID: 1}, openRoleRequest: true}, "test-secret")
+	_, err := svc.RequestRole(context.Background(), user.ID, "borrower")
 	if !errors.Is(err, service.ErrRoleRequestExists) {
 		t.Fatalf("expected ErrRoleRequestExists, got %v", err)
 	}
 }
 
+func TestRequestRoleRejectsBlockedUser(t *testing.T) {
+	user := &model.User{ID: uuid.New(), Status: "blocked"}
+	svc := service.NewAuthService(&fakeRepository{user: user}, "test-secret")
+	_, err := svc.RequestRole(context.Background(), user.ID, "borrower")
+	if !errors.Is(err, service.ErrUserInactive) {
+		t.Fatalf("expected ErrUserInactive, got %v", err)
+	}
+}
+
 func TestProfileReturnsCurrentApprovedRoles(t *testing.T) {
-	user := &model.User{ID: uuid.New(), Email: "budi@example.com"}
+	user := &model.User{ID: uuid.New(), Email: "budi@example.com", Status: "active"}
 	svc := service.NewAuthService(&fakeRepository{user: user, roles: []string{"borrower", "lender"}}, "test-secret")
 	profile, err := svc.Profile(context.Background(), user.ID)
 	if err != nil {
@@ -152,6 +163,15 @@ func TestProfileReturnsCurrentApprovedRoles(t *testing.T) {
 	}
 	if profile.User != user || len(profile.Roles) != 2 {
 		t.Fatalf("unexpected profile: %#v", profile)
+	}
+}
+
+func TestProfileRejectsBlockedUser(t *testing.T) {
+	user := &model.User{ID: uuid.New(), Status: "blocked"}
+	svc := service.NewAuthService(&fakeRepository{user: user}, "test-secret")
+	_, err := svc.Profile(context.Background(), user.ID)
+	if !errors.Is(err, service.ErrUserInactive) {
+		t.Fatalf("expected ErrUserInactive, got %v", err)
 	}
 }
 

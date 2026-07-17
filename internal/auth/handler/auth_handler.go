@@ -71,6 +71,9 @@ func (h *AuthHandler) Me(c *fiber.Ctx) error {
 	}
 	profile, err := h.service.Profile(c.Context(), userID)
 	if err != nil {
+		if errors.Is(err, service.ErrUserInactive) {
+			return c.Status(403).JSON(fiber.Map{"error": "account is not active"})
+		}
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return c.Status(401).JSON(fiber.Map{"error": "user not found"})
 		}
@@ -93,6 +96,8 @@ func (h *AuthHandler) RequestRole(c *fiber.Ctx) error {
 	roleRequest, err := h.service.RequestRole(c.Context(), userID, request.Role)
 	if err != nil {
 		switch {
+		case errors.Is(err, service.ErrUserInactive):
+			return c.Status(403).JSON(fiber.Map{"error": "account is not active"})
 		case errors.Is(err, service.ErrInvalidRole):
 			return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 		case errors.Is(err, service.ErrRoleRequestExists):
