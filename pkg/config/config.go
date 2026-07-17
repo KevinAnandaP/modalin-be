@@ -16,6 +16,7 @@ type Config struct {
 	DBName     string
 	DBSSLMode  string
 	DBTimeZone string
+	JWTSecret  string
 }
 
 var AppConfig *Config
@@ -36,6 +37,7 @@ func LoadConfig() {
 		DBName:     getEnv("DB_NAME", "modalin-db"),
 		DBSSLMode:  getEnv("DB_SSLMODE", "disable"),
 		DBTimeZone: getEnv("DB_TIMEZONE", "Asia/Jakarta"),
+		JWTSecret:  getEnv("JWT_SECRET", ""),
 	}
 }
 

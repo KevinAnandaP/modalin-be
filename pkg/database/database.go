@@ -53,6 +53,7 @@ func ConnectDB() {
 		&model.User{},
 		&model.Role{},
 		&model.UserRole{},
+		&model.RoleRequest{},
 		&model.BusinessCategory{},
 		&model.Business{},
 		&model.FinancialRecord{},
