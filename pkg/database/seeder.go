@@ -2,8 +2,11 @@ package database
 
 import (
 	"log"
+	"time"
+
 	"modalin-be/internal/model"
 
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
@@ -62,6 +65,51 @@ func SeedData(db *gorm.DB) {
 			}
 		} else if err != nil {
 			log.Printf("Error checking category %d: %v", c.ID, err)
+		}
+	}
+
+	// 3. Seed Default Admin User
+	adminEmail := "admin@modalin.id"
+	var existingAdmin model.User
+	err := db.Where("email = ?", adminEmail).First(&existingAdmin).Error
+	if err == gorm.ErrRecordNotFound {
+		hash, err := bcrypt.GenerateFromPassword([]byte("admin12345"), bcrypt.DefaultCost)
+		if err == nil {
+			now := time.Now().UTC()
+			adminUser := model.User{
+				FullName:        "System Administrator",
+				Email:           adminEmail,
+				Phone:           "080000000000",
+				PasswordHash:    string(hash),
+				City:            "Jakarta",
+				Address:         "Modalin HQ",
+				Status:          "active",
+				TermsAcceptedAt: &now,
+				TermsVersion:    "v1",
+			}
+			if err := db.Create(&adminUser).Error; err == nil {
+				log.Printf("Seeded default admin user: %s", adminEmail)
+				userRole := model.UserRole{
+					UserID:     adminUser.ID,
+					RoleID:     4, // Admin role
+					Status:     "approved",
+					ApprovedAt: &now,
+				}
+				db.Create(&userRole)
+			}
+		}
+	} else if err == nil {
+		var existingUserRole model.UserRole
+		errUR := db.Where("user_id = ? AND role_id = ?", existingAdmin.ID, 4).First(&existingUserRole).Error
+		if errUR == gorm.ErrRecordNotFound {
+			now := time.Now().UTC()
+			userRole := model.UserRole{
+				UserID:     existingAdmin.ID,
+				RoleID:     4,
+				Status:     "approved",
+				ApprovedAt: &now,
+			}
+			db.Create(&userRole)
 		}
 	}
 

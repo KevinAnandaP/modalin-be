@@ -45,4 +45,9 @@ func SetupRoutes(app *fiber.App) {
 	authRoutes.Post("/login", auth.Login)
 	authRoutes.Get("/me", middleware.JWTProtected(config.AppConfig.JWTSecret), auth.Me)
 	authRoutes.Post("/roles", middleware.JWTProtected(config.AppConfig.JWTSecret), auth.RequestRole)
+
+	// Admin Role Management Routes
+	adminRoutes := v1.Group("/admin", middleware.JWTProtected(config.AppConfig.JWTSecret), middleware.RequireRole("admin"))
+	adminRoutes.Get("/roles/requests", auth.GetRoleRequests)
+	adminRoutes.Post("/roles/review", auth.ReviewRoleRequest)
 }

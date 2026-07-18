@@ -32,15 +32,23 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 	if request.FullName == "" || request.Email == "" || request.Phone == "" || request.Password == "" || request.City == "" || request.Address == "" {
 		return c.Status(400).JSON(fiber.Map{"error": "all profile fields are required"})
 	}
-	user, err := h.service.Register(c.Context(), service.RegisterInput{FullName: request.FullName, Email: request.Email, Phone: request.Phone, Password: request.Password, City: request.City, Address: request.Address, TermsAccepted: request.TermsAccepted})
+	user, err := h.service.Register(c.Context(), service.RegisterInput{
+		FullName:      request.FullName,
+		Email:         request.Email,
+		Phone:         request.Phone,
+		Password:      request.Password,
+		City:          request.City,
+		Address:       request.Address,
+		TermsAccepted: request.TermsAccepted,
+	})
 	if err != nil {
 		switch {
-		case errors.Is(err, service.ErrTermsNotAccepted):
+		case errors.Is(err, service.ErrTermsNotAccepted), errors.Is(err, service.ErrPasswordLength):
 			return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 		case errors.Is(err, service.ErrEmailTaken):
 			return c.Status(409).JSON(fiber.Map{"error": err.Error()})
 		default:
-			return c.Status(400).JSON(fiber.Map{"error": "registration failed"})
+			return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 		}
 	}
 	return c.Status(201).JSON(fiber.Map{"data": user})
@@ -87,18 +95,20 @@ func (h *AuthHandler) RequestRole(c *fiber.Ctx) error {
 	if !ok {
 		return c.Status(401).JSON(fiber.Map{"error": "invalid authorization context"})
 	}
-	var request struct {
-		Role string `json:"role"`
-	}
+	var request service.RequestRoleInput
 	if err := c.BodyParser(&request); err != nil || request.Role == "" {
 		return c.Status(400).JSON(fiber.Map{"error": "role is required"})
 	}
-	roleRequest, err := h.service.RequestRole(c.Context(), userID, request.Role)
+	roleRequest, err := h.service.RequestRole(c.Context(), userID, request)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrUserInactive):
 			return c.Status(403).JSON(fiber.Map{"error": "account is not active"})
-		case errors.Is(err, service.ErrInvalidRole):
+		case errors.Is(err, service.ErrInvalidRole),
+			errors.Is(err, service.ErrIdentityCardRequired),
+			errors.Is(err, service.ErrRiskAgreementRequired),
+			errors.Is(err, service.ErrEthicsAgreementRequired),
+			errors.Is(err, service.ErrTrainingRequired):
 			return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 		case errors.Is(err, service.ErrRoleRequestExists):
 			return c.Status(409).JSON(fiber.Map{"error": err.Error()})
@@ -107,4 +117,36 @@ func (h *AuthHandler) RequestRole(c *fiber.Ctx) error {
 		}
 	}
 	return c.Status(201).JSON(fiber.Map{"data": roleRequest})
+}
+
+func (h *AuthHandler) GetRoleRequests(c *fiber.Ctx) error {
+	status := c.Query("status", "")
+	requests, err := h.service.GetRoleRequests(c.Context(), status)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "failed to fetch role requests"})
+	}
+	return c.JSON(fiber.Map{"data": requests})
+}
+
+func (h *AuthHandler) ReviewRoleRequest(c *fiber.Ctx) error {
+	adminID, ok := c.Locals("user_id").(uuid.UUID)
+	if !ok {
+		return c.Status(401).JSON(fiber.Map{"error": "invalid authorization context"})
+	}
+	var request service.ReviewRoleRequestInput
+	if err := c.BodyParser(&request); err != nil || request.RequestID == uuid.Nil || request.Action == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "request_id and action are required"})
+	}
+	reviewed, err := h.service.ReviewRoleRequest(c.Context(), adminID, request)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrRoleRequestNotFound):
+			return c.Status(444).JSON(fiber.Map{"error": err.Error()})
+		case errors.Is(err, service.ErrInvalidAction):
+			return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+		default:
+			return c.Status(500).JSON(fiber.Map{"error": "failed to review role request"})
+		}
+	}
+	return c.JSON(fiber.Map{"data": reviewed})
 }

@@ -69,16 +69,24 @@ type UserRole struct {
 
 // RoleRequest represents the approval workflow; it is separate from active roles.
 type RoleRequest struct {
-	ID        uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
-	UserID    uuid.UUID      `gorm:"type:uuid;index;not null"`
-	RoleID    int            `gorm:"index;not null"`
-	Status    string         `gorm:"type:varchar(50);default:'submitted';not null"` // submitted, under_review, revision_required, approved, rejected
-	CreatedAt time.Time      `gorm:"not null"`
-	UpdatedAt time.Time      `gorm:"not null"`
-	DeletedAt gorm.DeletedAt `gorm:"index"`
+	ID                    uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	UserID                uuid.UUID      `gorm:"type:uuid;index;not null"`
+	RoleID                int            `gorm:"index;not null"`
+	Status                string         `gorm:"type:varchar(50);default:'submitted';not null"` // submitted, under_review, revision_required, approved, rejected
+	IdentityCardURL       *string        `gorm:"type:text"`                                     // Foto KTP / Identitas
+	RiskAgreementAccepted bool           `gorm:"type:boolean;default:false;not null"`           // Khusus Lender
+	EthicsAccepted        bool           `gorm:"type:boolean;default:false;not null"`           // Khusus Verifier
+	TrainingCompleted     bool           `gorm:"type:boolean;default:false;not null"`           // Khusus Verifier
+	AdminNote             *string        `gorm:"type:text"`                                     // Catatan admin saat revisi/penolakan
+	ApprovedBy            *uuid.UUID     `gorm:"type:uuid;index"`
+	ApprovedAt            *time.Time     `gorm:"type:timestamp"`
+	CreatedAt             time.Time      `gorm:"not null"`
+	UpdatedAt             time.Time      `gorm:"not null"`
+	DeletedAt             gorm.DeletedAt `gorm:"index"`
 
-	User User `gorm:"foreignKey:UserID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
-	Role Role `gorm:"foreignKey:RoleID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
+	User     User  `gorm:"foreignKey:UserID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
+	Role     Role  `gorm:"foreignKey:RoleID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
+	Approver *User `gorm:"foreignKey:ApprovedBy;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;"`
 }
 
 func (RoleRequest) TableName() string { return "role_requests" }

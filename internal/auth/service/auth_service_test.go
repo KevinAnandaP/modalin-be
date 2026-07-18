@@ -22,6 +22,8 @@ type fakeRepository struct {
 	createdUser     *model.User
 	createdRequest  *model.RoleRequest
 	openRoleRequest bool
+	approvedUserID  uuid.UUID
+	approvedRoleID  int
 }
 
 func (r *fakeRepository) CreateUser(_ context.Context, user *model.User) error {
@@ -41,7 +43,7 @@ func (r *fakeRepository) FindUserByID(_ context.Context, id uuid.UUID) (*model.U
 	}
 	return nil, gorm.ErrRecordNotFound
 }
-func (r *fakeRepository) FindRoleByName(_ context.Context, _ string) (*model.Role, error) {
+func (r *fakeRepository) FindRoleByName(_ context.Context, name string) (*model.Role, error) {
 	if r.role == nil {
 		return nil, gorm.ErrRecordNotFound
 	}
@@ -56,6 +58,27 @@ func (r *fakeRepository) HasOpenRoleRequest(_ context.Context, _ uuid.UUID, _ in
 }
 func (r *fakeRepository) GetApprovedRoles(_ context.Context, _ uuid.UUID) ([]string, error) {
 	return r.roles, nil
+}
+func (r *fakeRepository) GetRoleRequests(_ context.Context, _ string) ([]model.RoleRequest, error) {
+	if r.createdRequest != nil {
+		return []model.RoleRequest{*r.createdRequest}, nil
+	}
+	return nil, nil
+}
+func (r *fakeRepository) FindRoleRequestByID(_ context.Context, id uuid.UUID) (*model.RoleRequest, error) {
+	if r.createdRequest != nil {
+		return r.createdRequest, nil
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+func (r *fakeRepository) UpdateRoleRequest(_ context.Context, req *model.RoleRequest) error {
+	r.createdRequest = req
+	return nil
+}
+func (r *fakeRepository) ApproveUserRole(_ context.Context, userID uuid.UUID, roleID int, _ uuid.UUID) error {
+	r.approvedUserID = userID
+	r.approvedRoleID = roleID
+	return nil
 }
 
 func TestRegisterRejectsUnacceptedTerms(t *testing.T) {
@@ -117,7 +140,7 @@ func TestLoginIssuesTokenWithApprovedRoles(t *testing.T) {
 func TestRequestRoleRejectsAdmin(t *testing.T) {
 	user := &model.User{ID: uuid.New(), Status: "active"}
 	svc := service.NewAuthService(&fakeRepository{user: user}, "test-secret")
-	_, err := svc.RequestRole(context.Background(), user.ID, "admin")
+	_, err := svc.RequestRole(context.Background(), user.ID, service.RequestRoleInput{Role: "admin"})
 	if !errors.Is(err, service.ErrInvalidRole) {
 		t.Fatalf("expected ErrInvalidRole, got %v", err)
 	}
@@ -127,7 +150,7 @@ func TestRequestRoleCreatesBorrowerRequest(t *testing.T) {
 	repo := &fakeRepository{user: &model.User{ID: uuid.New(), Status: "active"}, role: &model.Role{ID: 1, Name: "borrower"}}
 	svc := service.NewAuthService(repo, "test-secret")
 	userID := repo.user.ID
-	request, err := svc.RequestRole(context.Background(), userID, " borrower ")
+	request, err := svc.RequestRole(context.Background(), userID, service.RequestRoleInput{Role: " borrower "})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,10 +159,85 @@ func TestRequestRoleCreatesBorrowerRequest(t *testing.T) {
 	}
 }
 
+func TestRequestRoleLenderRequiresKTPAndRiskAgreement(t *testing.T) {
+	user := &model.User{ID: uuid.New(), Status: "active"}
+	repo := &fakeRepository{user: user, role: &model.Role{ID: 2, Name: "lender"}}
+	svc := service.NewAuthService(repo, "test-secret")
+
+	// Missing KTP
+	_, err := svc.RequestRole(context.Background(), user.ID, service.RequestRoleInput{Role: "lender", RiskAgreementAccepted: true})
+	if !errors.Is(err, service.ErrIdentityCardRequired) {
+		t.Fatalf("expected ErrIdentityCardRequired, got %v", err)
+	}
+
+	// Missing Risk Agreement
+	ktp := "https://storage.modalin.id/ktp.jpg"
+	_, err = svc.RequestRole(context.Background(), user.ID, service.RequestRoleInput{Role: "lender", IdentityCardURL: &ktp, RiskAgreementAccepted: false})
+	if !errors.Is(err, service.ErrRiskAgreementRequired) {
+		t.Fatalf("expected ErrRiskAgreementRequired, got %v", err)
+	}
+
+	// Valid Lender Application
+	req, err := svc.RequestRole(context.Background(), user.ID, service.RequestRoleInput{Role: "lender", IdentityCardURL: &ktp, RiskAgreementAccepted: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Status != "submitted" || !req.RiskAgreementAccepted {
+		t.Fatalf("unexpected lender request: %#v", req)
+	}
+}
+
+func TestRequestRoleVerifierRequiresRequirements(t *testing.T) {
+	user := &model.User{ID: uuid.New(), Status: "active"}
+	repo := &fakeRepository{user: user, role: &model.Role{ID: 3, Name: "verifier"}}
+	svc := service.NewAuthService(repo, "test-secret")
+	ktp := "https://storage.modalin.id/ktp.jpg"
+
+	// Missing Ethics
+	_, err := svc.RequestRole(context.Background(), user.ID, service.RequestRoleInput{Role: "verifier", IdentityCardURL: &ktp, EthicsAccepted: false, TrainingCompleted: true})
+	if !errors.Is(err, service.ErrEthicsAgreementRequired) {
+		t.Fatalf("expected ErrEthicsAgreementRequired, got %v", err)
+	}
+
+	// Missing Training
+	_, err = svc.RequestRole(context.Background(), user.ID, service.RequestRoleInput{Role: "verifier", IdentityCardURL: &ktp, EthicsAccepted: true, TrainingCompleted: false})
+	if !errors.Is(err, service.ErrTrainingRequired) {
+		t.Fatalf("expected ErrTrainingRequired, got %v", err)
+	}
+
+	// Valid Verifier Application
+	req, err := svc.RequestRole(context.Background(), user.ID, service.RequestRoleInput{Role: "verifier", IdentityCardURL: &ktp, EthicsAccepted: true, TrainingCompleted: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Status != "submitted" || !req.EthicsAccepted || !req.TrainingCompleted {
+		t.Fatalf("unexpected verifier request: %#v", req)
+	}
+}
+
+func TestReviewRoleRequestApprove(t *testing.T) {
+	user := &model.User{ID: uuid.New(), Status: "active"}
+	reqID := uuid.New()
+	adminID := uuid.New()
+	repo := &fakeRepository{
+		user:           user,
+		createdRequest: &model.RoleRequest{ID: reqID, UserID: user.ID, RoleID: 2, Status: "submitted"},
+	}
+	svc := service.NewAuthService(repo, "test-secret")
+
+	req, err := svc.ReviewRoleRequest(context.Background(), adminID, service.ReviewRoleRequestInput{RequestID: reqID, Action: "approve"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Status != "approved" || repo.approvedUserID != user.ID || repo.approvedRoleID != 2 {
+		t.Fatalf("unexpected review result: %#v", req)
+	}
+}
+
 func TestRequestRoleRejectsOpenDuplicate(t *testing.T) {
 	user := &model.User{ID: uuid.New(), Status: "active"}
 	svc := service.NewAuthService(&fakeRepository{user: user, role: &model.Role{ID: 1}, openRoleRequest: true}, "test-secret")
-	_, err := svc.RequestRole(context.Background(), user.ID, "borrower")
+	_, err := svc.RequestRole(context.Background(), user.ID, service.RequestRoleInput{Role: "borrower"})
 	if !errors.Is(err, service.ErrRoleRequestExists) {
 		t.Fatalf("expected ErrRoleRequestExists, got %v", err)
 	}
@@ -148,7 +246,7 @@ func TestRequestRoleRejectsOpenDuplicate(t *testing.T) {
 func TestRequestRoleRejectsBlockedUser(t *testing.T) {
 	user := &model.User{ID: uuid.New(), Status: "blocked"}
 	svc := service.NewAuthService(&fakeRepository{user: user}, "test-secret")
-	_, err := svc.RequestRole(context.Background(), user.ID, "borrower")
+	_, err := svc.RequestRole(context.Background(), user.ID, service.RequestRoleInput{Role: "borrower"})
 	if !errors.Is(err, service.ErrUserInactive) {
 		t.Fatalf("expected ErrUserInactive, got %v", err)
 	}
