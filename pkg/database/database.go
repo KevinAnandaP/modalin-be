@@ -81,6 +81,14 @@ func ConnectDB() {
 	if err != nil {
 		log.Fatalf("Failed to run database migrations: %v", err)
 	}
+	// GORM cannot express PostgreSQL partial unique indexes. This allows a user to
+	// keep historical inactive businesses while enforcing exactly one active business.
+	if err := db.Exec("DROP INDEX IF EXISTS idx_businesses_user_id").Error; err != nil {
+		log.Fatalf("Failed to replace business user index: %v", err)
+	}
+	if err := db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_businesses_one_active_per_user ON businesses (user_id) WHERE status = 'active'").Error; err != nil {
+		log.Fatalf("Failed to create active business uniqueness index: %v", err)
+	}
 	log.Println("Database migrations completed successfully!")
 
 	// Run Master Data Seeder

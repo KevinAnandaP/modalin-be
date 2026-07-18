@@ -1,0 +1,969 @@
+{
+	"info": {
+		"_postman_id": "modalin-auth-rbac-collection",
+		"name": "Modalin API - Auth, Role Request, Admin Review, Business & Financial Records",
+		"description": "Koleksi lengkap Postman untuk pengujian API Modalin Backend (Auth Manual, Google 2-Step Onboarding, Pengajuan Role Borrower/Lender/Verifier, Admin Review Role, Profil Bisnis Rintisan/Berjalan, serta Pencatatan Keuangan dan Bukti Transaksi).",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "baseUrl",
+			"value": "http://localhost:8080/api/v1",
+			"type": "string"
+		},
+		{
+			"key": "token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "adminToken",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "tempToken",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "requestId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "recordId",
+			"value": "",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "0. System & Health Check",
+			"item": [
+				{
+					"name": "0.1 System Health Check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/ping",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"ping"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "0.2 Root API Check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "http://localhost:8080/",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8080",
+							"path": [
+								""
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "1. Authentication (Manual & Google OAuth)",
+			"item": [
+				{
+					"name": "1.1 Register User Baru (Manual)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"full_name\": \"Budi Santoso\",\n  \"email\": \"budi.borrower@example.com\",\n  \"phone\": \"081234567890\",\n  \"password\": \"password12345\",\n  \"city\": \"Jakarta Selatan\",\n  \"address\": \"Jl. Merdeka Raya No. 12\",\n  \"terms_accepted\": true\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/auth/register",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"auth",
+								"register"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "1.2 Login User (Manual)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"if (jsonData.data && jsonData.data.token) {",
+									"    pm.collectionVariables.set('token', jsonData.data.token);",
+									"    console.log('Token user tersimpan di variable {{token}}!');",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"budi.borrower@example.com\",\n  \"password\": \"password12345\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/auth/login",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"auth",
+								"login"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "1.3 Google OAuth Step 1 - Auth/Check",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"if (jsonData.data && jsonData.data.temp_token) {",
+									"    pm.collectionVariables.set('tempToken', jsonData.data.temp_token);",
+									"    console.log('Temp Token Google tersimpan di variable {{tempToken}}!');",
+									"}",
+									"if (jsonData.data && jsonData.data.login_result && jsonData.data.login_result.token) {",
+									"    pm.collectionVariables.set('token', jsonData.data.login_result.token);",
+									"    console.log('User lama Google langsung login, Token diset!');",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"google_id\": \"109876543210987654321\",\n  \"email\": \"user.google.baru@gmail.com\",\n  \"full_name\": \"User Baru Google\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/auth/google",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"auth",
+								"google"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "1.4 Google OAuth Step 2 - Complete Registration",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"if (jsonData.data && jsonData.data.token) {",
+									"    pm.collectionVariables.set('token', jsonData.data.token);",
+									"    console.log('Registrasi Google selesai, Token resmi diset di {{token}}!');",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"temp_token\": \"{{tempToken}}\",\n  \"phone\": \"089876543210\",\n  \"city\": \"Surabaya\",\n  \"address\": \"Jl. Pemuda No. 88\",\n  \"terms_accepted\": true\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/auth/google/complete",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"auth",
+								"google",
+								"complete"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "1.5 Get Profile (Me)",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/auth/me",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"auth",
+								"me"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "2. Role Management & Admin Review",
+			"item": [
+				{
+					"name": "2.1 Request Role - Borrower",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"if (jsonData.data && jsonData.data.id) {",
+									"    pm.collectionVariables.set('requestId', jsonData.data.id);",
+									"    console.log('Role Request ID tersimpan di variable {{requestId}}!');",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"role\": \"borrower\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/auth/roles",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"auth",
+								"roles"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "2.2 Request Role - Lender",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"if (jsonData.data && jsonData.data.id) {",
+									"    pm.collectionVariables.set('requestId', jsonData.data.id);",
+									"    console.log('Role Request ID tersimpan di variable {{requestId}}!');",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"role\": \"lender\",\n  \"identity_card_url\": \"https://storage.modalin.id/ktp/budi-ktp.jpg\",\n  \"risk_agreement_accepted\": true\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/auth/roles",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"auth",
+								"roles"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "2.3 Request Role - Verifier",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"if (jsonData.data && jsonData.data.id) {",
+									"    pm.collectionVariables.set('requestId', jsonData.data.id);",
+									"    console.log('Role Request ID tersimpan di variable {{requestId}}!');",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"role\": \"verifier\",\n  \"identity_card_url\": \"https://storage.modalin.id/ktp/verifier-ktp.jpg\",\n  \"ethics_accepted\": true,\n  \"training_completed\": true\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/auth/roles",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"auth",
+								"roles"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "2.4 Login Admin Default",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"if (jsonData.data && jsonData.data.token) {",
+									"    pm.collectionVariables.set('adminToken', jsonData.data.token);",
+									"    console.log('Token Admin tersimpan di variable {{adminToken}}!');",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"admin@modalin.id\",\n  \"password\": \"admin12345\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/auth/login",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"auth",
+								"login"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "2.5 Get All Role Requests (Admin)",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{adminToken}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/admin/roles/requests?status=submitted",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"roles",
+								"requests"
+							],
+							"query": [
+								{
+									"key": "status",
+									"value": "submitted"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "2.6 Review & Approve Role Request (Admin)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{adminToken}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"request_id\": \"{{requestId}}\",\n  \"action\": \"approve\",\n  \"admin_note\": \"Dokumen lengkap dan valid.\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/admin/roles/review",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"admin",
+								"roles",
+								"review"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "2.7 Re-login User (Refresh JWT with Approved Role)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"if (jsonData.data && jsonData.data.token) {",
+									"    pm.collectionVariables.set('token', jsonData.data.token);",
+									"    console.log('Token user diperbarui dengan role baru di {{token}}!');",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"budi.borrower@example.com\",\n  \"password\": \"password12345\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/auth/login",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"auth",
+								"login"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "3. Business Profile Management (Borrower Role)",
+			"item": [
+				{
+					"name": "3.1 Create Business Profile (Starter / Rintisan - Limit 300k)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"business_name\": \"Kedai Kopi Rintisan Merdeka\",\n  \"category_id\": 1,\n  \"description\": \"Usaha rintisan kedai kopi kekinian spesialis racikan lokal\",\n  \"business_type\": \"starter\",\n  \"location_address\": \"Jl. Merdeka Raya No. 45, Bandung\",\n  \"target_market\": \"Mahasiswa dan pekerja WFH di area kampus\",\n  \"supplier_info\": \"Koperasi Petani Kopi Mandiri Garut\",\n  \"pricing_estimation\": \"Modal per cangkir Rp6.000, Harga jual Rp18.000\",\n  \"readiness_proof_url\": \"https://storage.modalin.id/proofs/contoh-produk-kopi.jpg\",\n  \"commitment_checked\": true\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/businesses",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"businesses"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "3.2 Create Business Profile (Running / Berjalan - Limit 500k)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"business_name\": \"Toko Kelontong Berkah Sejahtera\",\n  \"category_id\": 2,\n  \"description\": \"Usaha kelontong sembako eceran dan grosir mini\",\n  \"business_type\": \"running\",\n  \"location_address\": \"Jl. Diponegoro No. 10, Surabaya\",\n  \"commitment_checked\": true\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/businesses",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"businesses"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "3.3 Get My Business Profile & Limit",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/businesses/me",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"businesses",
+								"me"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "3.4 Update Business Profile",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"business_name\": \"Kedai Kopi Rintisan Merdeka (Updated)\",\n  \"description\": \"Usaha rintisan kedai kopi kekinian & cemilan tradisional\",\n  \"location_address\": \"Jl. Merdeka Raya No. 47, Bandung\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/businesses/me",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"businesses",
+								"me"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "3.5 Deactivate Business Profile",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/businesses/me",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"businesses",
+								"me"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "4. Financial Records & Proofs (Borrower Role)",
+			"item": [
+				{
+					"name": "4.1 Create Financial Record + Initial Proofs",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"if (jsonData.data && jsonData.data.id) {",
+									"    pm.collectionVariables.set('recordId', jsonData.data.id);",
+									"    console.log('Financial Record ID tersimpan di variable {{recordId}}!');",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"record_date\": \"2026-07-18T00:00:00Z\",\n  \"income_amount\": 650000,\n  \"expense_amount\": 200000,\n  \"note\": \"Penjualan 35 cangkir kopi & pembelian bahan baku susu/biji kopi\",\n  \"proofs\": [\n    {\n      \"file_url\": \"https://storage.modalin.id/proofs/nota-pembelian-susu.jpg\",\n      \"proof_type\": \"receipt\",\n      \"amount\": 200000\n    }\n  ]\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/financial-records",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"financial-records"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "4.2 Get Financial Records List (Filter Month/Year)",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/financial-records?year=2026&month=7",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"financial-records"
+							],
+							"query": [
+								{
+									"key": "year",
+									"value": "2026"
+								},
+								{
+									"key": "month",
+									"value": "7"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "4.3 Get Financial Record Detail by ID",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/financial-records/{{recordId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"financial-records",
+								"{{recordId}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "4.4 Get Financial Summary & Net Cashflow",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/financial-records/summary?year=2026&month=7",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"financial-records",
+								"summary"
+							],
+							"query": [
+								{
+									"key": "year",
+									"value": "2026"
+								},
+								{
+									"key": "month",
+									"value": "7"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "4.5 Update Financial Record",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"income_amount\": 750000,\n  \"expense_amount\": 250000,\n  \"note\": \"Revisi omset harian dan pembelian cup kopi tambahan\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/financial-records/{{recordId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"financial-records",
+								"{{recordId}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "4.6 Upload Financial Record Proof (Multipart File)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "file",
+									"type": "file",
+									"src": []
+								},
+								{
+									"key": "proof_type",
+									"value": "receipt",
+									"type": "text"
+								},
+								{
+									"key": "amount",
+									"value": "250000",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{baseUrl}}/financial-records/{{recordId}}/proofs",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"financial-records",
+								"{{recordId}}",
+								"proofs"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "4.7 Delete Financial Record",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/financial-records/{{recordId}}",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"financial-records",
+								"{{recordId}}"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		}
+	]
+}

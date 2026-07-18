@@ -32,6 +32,7 @@ func main() {
 	app.Use(logger.New())  // Request logging
 	app.Use(recover.New()) // Panic recovery
 	app.Use(cors.New())    // CORS configuration (crucial for Vue frontend)
+	app.Static("/uploads", config.AppConfig.UploadDir)
 
 	// 5. Setup Routes
 	router.SetupRoutes(app)

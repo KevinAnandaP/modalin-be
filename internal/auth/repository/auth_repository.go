@@ -14,6 +14,7 @@ type Repository interface {
 	CreateUser(context.Context, *model.User) error
 	FindUserByEmail(context.Context, string) (*model.User, error)
 	FindUserByID(context.Context, uuid.UUID) (*model.User, error)
+	FindUserByGoogleID(context.Context, string) (*model.User, error)
 	FindRoleByName(context.Context, string) (*model.Role, error)
 	CreateRoleRequest(context.Context, *model.RoleRequest) error
 	HasOpenRoleRequest(context.Context, uuid.UUID, int) (bool, error)
@@ -43,6 +44,14 @@ func (r *AuthRepository) FindUserByEmail(ctx context.Context, email string) (*mo
 func (r *AuthRepository) FindUserByID(ctx context.Context, id uuid.UUID) (*model.User, error) {
 	var user model.User
 	if err := r.db.WithContext(ctx).First(&user, "id = ?", id).Error; err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+func (r *AuthRepository) FindUserByGoogleID(ctx context.Context, googleID string) (*model.User, error) {
+	var user model.User
+	if err := r.db.WithContext(ctx).Where("google_id = ?", googleID).First(&user).Error; err != nil {
 		return nil, err
 	}
 	return &user, nil

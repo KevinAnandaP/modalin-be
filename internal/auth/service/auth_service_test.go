@@ -43,6 +43,12 @@ func (r *fakeRepository) FindUserByID(_ context.Context, id uuid.UUID) (*model.U
 	}
 	return nil, gorm.ErrRecordNotFound
 }
+func (r *fakeRepository) FindUserByGoogleID(_ context.Context, googleID string) (*model.User, error) {
+	if r.user != nil && r.user.GoogleID != nil && *r.user.GoogleID == googleID {
+		return r.user, nil
+	}
+	return nil, gorm.ErrRecordNotFound
+}
 func (r *fakeRepository) FindRoleByName(_ context.Context, name string) (*model.Role, error) {
 	if r.role == nil {
 		return nil, gorm.ErrRecordNotFound
@@ -134,6 +140,46 @@ func TestLoginIssuesTokenWithApprovedRoles(t *testing.T) {
 	roles := parsed.Claims.(jwt.MapClaims)["roles"].([]interface{})
 	if len(roles) != 1 || roles[0] != "lender" {
 		t.Fatalf("unexpected roles: %#v", roles)
+	}
+}
+
+func TestGoogleAuthNewUserReturnsTempToken(t *testing.T) {
+	repo := &fakeRepository{}
+	svc := service.NewAuthService(repo, "test-secret")
+
+	res, err := svc.GoogleAuth(context.Background(), "google-sub-123", "googleuser@gmail.com", "Google User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.IsNewUser || res.TempToken == "" || res.Prefill.Email != "googleuser@gmail.com" {
+		t.Fatalf("unexpected google auth result: %#v", res)
+	}
+}
+
+func TestCompleteGoogleRegistrationSuccess(t *testing.T) {
+	repo := &fakeRepository{}
+	svc := service.NewAuthService(repo, "test-secret")
+
+	resAuth, err := svc.GoogleAuth(context.Background(), "google-sub-123", "googleuser@gmail.com", "Google User")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	loginRes, err := svc.CompleteGoogleRegistration(context.Background(), service.CompleteGoogleRegistrationInput{
+		TempToken:     resAuth.TempToken,
+		Phone:         "089988776655",
+		City:          "Surabaya",
+		Address:       "Jl. Pemuda No. 5",
+		TermsAccepted: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loginRes.Token == "" {
+		t.Fatalf("expected valid token, got %#v", loginRes)
+	}
+	if repo.createdUser.Email != "googleuser@gmail.com" || *repo.createdUser.GoogleID != "google-sub-123" {
+		t.Fatalf("unexpected created user: %#v", repo.createdUser)
 	}
 }
 
