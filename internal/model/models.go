@@ -9,17 +9,19 @@ import (
 
 // 1. User
 type User struct {
-	ID           uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
-	FullName     string         `gorm:"type:varchar(255);not null"`
-	Email        string         `gorm:"type:varchar(255);uniqueIndex;not null"`
-	Phone        string         `gorm:"type:varchar(50);uniqueIndex;not null"`
-	PasswordHash string         `gorm:"type:varchar(255);not null"`
-	City         string         `gorm:"type:varchar(100);not null"`
-	Address      string         `gorm:"type:text;not null"`
-	Status       string         `gorm:"type:varchar(50);default:'active';not null"` // active, suspended, blocked
-	CreatedAt    time.Time      `gorm:"not null"`
-	UpdatedAt    time.Time      `gorm:"not null"`
-	DeletedAt    gorm.DeletedAt `gorm:"index"`
+	ID              uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	FullName        string         `gorm:"type:varchar(255);not null"`
+	Email           string         `gorm:"type:varchar(255);uniqueIndex;not null"`
+	Phone           string         `gorm:"type:varchar(50);uniqueIndex;not null"`
+	PasswordHash    string         `gorm:"type:varchar(255);not null" json:"-"`
+	City            string         `gorm:"type:varchar(100);not null"`
+	Address         string         `gorm:"type:text;not null"`
+	Status          string         `gorm:"type:varchar(50);default:'active';not null"` // active, suspended, blocked
+	TermsAcceptedAt *time.Time     `gorm:"type:timestamp"`
+	TermsVersion    string         `gorm:"type:varchar(50)"`
+	CreatedAt       time.Time      `gorm:"not null"`
+	UpdatedAt       time.Time      `gorm:"not null"`
+	DeletedAt       gorm.DeletedAt `gorm:"index"`
 
 	// Relations
 	Roles    []UserRole `gorm:"foreignKey:UserID"`
@@ -65,6 +67,37 @@ type UserRole struct {
 	Approver *User `gorm:"foreignKey:ApprovedBy;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;"`
 }
 
+// RoleRequest represents the approval workflow; it is separate from active roles.
+type RoleRequest struct {
+	ID                    uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	UserID                uuid.UUID      `gorm:"type:uuid;index;not null"`
+	RoleID                int            `gorm:"index;not null"`
+	Status                string         `gorm:"type:varchar(50);default:'submitted';not null"` // submitted, under_review, revision_required, approved, rejected
+	IdentityCardURL       *string        `gorm:"type:text"`                                     // Foto KTP / Identitas
+	RiskAgreementAccepted bool           `gorm:"type:boolean;default:false;not null"`           // Khusus Lender
+	EthicsAccepted        bool           `gorm:"type:boolean;default:false;not null"`           // Khusus Verifier
+	TrainingCompleted     bool           `gorm:"type:boolean;default:false;not null"`           // Khusus Verifier
+	AdminNote             *string        `gorm:"type:text"`                                     // Catatan admin saat revisi/penolakan
+	ApprovedBy            *uuid.UUID     `gorm:"type:uuid;index"`
+	ApprovedAt            *time.Time     `gorm:"type:timestamp"`
+	CreatedAt             time.Time      `gorm:"not null"`
+	UpdatedAt             time.Time      `gorm:"not null"`
+	DeletedAt             gorm.DeletedAt `gorm:"index"`
+
+	User     User  `gorm:"foreignKey:UserID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
+	Role     Role  `gorm:"foreignKey:RoleID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
+	Approver *User `gorm:"foreignKey:ApprovedBy;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;"`
+}
+
+func (RoleRequest) TableName() string { return "role_requests" }
+
+func (rr *RoleRequest) BeforeCreate(tx *gorm.DB) (err error) {
+	if rr.ID == uuid.Nil {
+		rr.ID = uuid.New()
+	}
+	return nil
+}
+
 func (UserRole) TableName() string {
 	return "user_roles"
 }
@@ -89,29 +122,29 @@ func (BusinessCategory) TableName() string {
 
 // 5. Business
 type Business struct {
-	ID                   uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
-	UserID               uuid.UUID      `gorm:"type:uuid;uniqueIndex;not null"`
-	BusinessName         string         `gorm:"type:varchar(255);not null"`
-	CategoryID           int            `gorm:"index;not null"`
-	Description          string         `gorm:"type:text;not null"`
-	BusinessType         string         `gorm:"type:varchar(50);not null"` // running, starter
-	StartedAt            *time.Time     `gorm:"type:date"`
-	LocationAddress      string         `gorm:"type:text;not null"`
-	Latitude             *float64       `gorm:"type:decimal(10,8)"`
-	Longitude            *float64       `gorm:"type:decimal(11,8)"`
-	PhotoURL             *string        `gorm:"type:text"`
-	VerificationStatus   string         `gorm:"type:varchar(50);default:'unverified';not null"` // unverified, pending, verified, rejected
-	TrustScore           int            `gorm:"type:int;default:0;not null"`
+	ID                    uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	UserID                uuid.UUID      `gorm:"type:uuid;uniqueIndex;not null"`
+	BusinessName          string         `gorm:"type:varchar(255);not null"`
+	CategoryID            int            `gorm:"index;not null"`
+	Description           string         `gorm:"type:text;not null"`
+	BusinessType          string         `gorm:"type:varchar(50);not null"` // running, starter
+	StartedAt             *time.Time     `gorm:"type:date"`
+	LocationAddress       string         `gorm:"type:text;not null"`
+	Latitude              *float64       `gorm:"type:decimal(10,8)"`
+	Longitude             *float64       `gorm:"type:decimal(11,8)"`
+	PhotoURL              *string        `gorm:"type:text"`
+	VerificationStatus    string         `gorm:"type:varchar(50);default:'unverified';not null"` // unverified, pending, verified, rejected
+	TrustScore            int            `gorm:"type:int;default:0;not null"`
 	CurrentBorrowingLimit int64          `gorm:"type:bigint;default:300000;not null"` // limit pinjaman aktif (misal default 300k untuk rintisan)
-	CreatedAt            time.Time      `gorm:"not null"`
-	UpdatedAt            time.Time      `gorm:"not null"`
-	DeletedAt            gorm.DeletedAt `gorm:"index"`
+	CreatedAt             time.Time      `gorm:"not null"`
+	UpdatedAt             time.Time      `gorm:"not null"`
+	DeletedAt             gorm.DeletedAt `gorm:"index"`
 
 	// Relations
-	User             User                  `gorm:"foreignKey:UserID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
-	Category         BusinessCategory      `gorm:"foreignKey:CategoryID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
-	FinancialRecords []FinancialRecord     `gorm:"foreignKey:BusinessID"`
-	Campaigns        []LoanCampaign        `gorm:"foreignKey:BusinessID"`
+	User             User                   `gorm:"foreignKey:UserID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
+	Category         BusinessCategory       `gorm:"foreignKey:CategoryID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
+	FinancialRecords []FinancialRecord      `gorm:"foreignKey:BusinessID"`
+	Campaigns        []LoanCampaign         `gorm:"foreignKey:BusinessID"`
 	StarterDetails   *StarterBusinessDetail `gorm:"foreignKey:BusinessID"`
 }
 
@@ -141,8 +174,8 @@ type FinancialRecord struct {
 	DeletedAt     gorm.DeletedAt `gorm:"index"`
 
 	// Relations
-	Business Business `gorm:"foreignKey:BusinessID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
-	Verifier *User    `gorm:"foreignKey:VerifiedBy;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;"`
+	Business Business               `gorm:"foreignKey:BusinessID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
+	Verifier *User                  `gorm:"foreignKey:VerifiedBy;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;"`
 	Proofs   []FinancialRecordProof `gorm:"foreignKey:FinancialRecordID"`
 }
 
@@ -194,8 +227,8 @@ type VerificationRequest struct {
 	DeletedAt   gorm.DeletedAt `gorm:"index"`
 
 	// Relations
-	Business Business `gorm:"foreignKey:BusinessID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
-	Requester User    `gorm:"foreignKey:RequestedBy;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
+	Business  Business             `gorm:"foreignKey:BusinessID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
+	Requester User                 `gorm:"foreignKey:RequestedBy;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
 	Reports   []VerificationReport `gorm:"foreignKey:VerificationRequestID"`
 }
 
@@ -287,15 +320,15 @@ type LoanCampaign struct {
 	DeletedAt           gorm.DeletedAt `gorm:"index"`
 
 	// Relations
-	Business              Business                       `gorm:"foreignKey:BusinessID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
-	Approver              *User                          `gorm:"foreignKey:ApprovedBy;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;"`
-	BudgetItems           []CampaignBudgetItem           `gorm:"foreignKey:CampaignID"`
-	Milestones            []CampaignMilestone            `gorm:"foreignKey:CampaignID"`
-	Fundings              []Funding                      `gorm:"foreignKey:CampaignID"`
-	Disbursements         []Disbursement                 `gorm:"foreignKey:CampaignID"`
-	RevenueReports        []RevenueReport                `gorm:"foreignKey:CampaignID"`
-	Schedules             []RepaymentSchedule            `gorm:"foreignKey:CampaignID"`
-	Repayments            []Repayment                    `gorm:"foreignKey:CampaignID"`
+	Business              Business                        `gorm:"foreignKey:BusinessID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
+	Approver              *User                           `gorm:"foreignKey:ApprovedBy;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;"`
+	BudgetItems           []CampaignBudgetItem            `gorm:"foreignKey:CampaignID"`
+	Milestones            []CampaignMilestone             `gorm:"foreignKey:CampaignID"`
+	Fundings              []Funding                       `gorm:"foreignKey:CampaignID"`
+	Disbursements         []Disbursement                  `gorm:"foreignKey:CampaignID"`
+	RevenueReports        []RevenueReport                 `gorm:"foreignKey:CampaignID"`
+	Schedules             []RepaymentSchedule             `gorm:"foreignKey:CampaignID"`
+	Repayments            []Repayment                     `gorm:"foreignKey:CampaignID"`
 	RestructuringRequests []RepaymentRestructuringRequest `gorm:"foreignKey:CampaignID"`
 }
 
@@ -451,24 +484,24 @@ func (fup *FundUsageProof) BeforeCreate(tx *gorm.DB) (err error) {
 
 // 17. RevenueReport
 type RevenueReport struct {
-	ID               uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
-	CampaignID       uuid.UUID      `gorm:"type:uuid;index;not null"`
-	BusinessID       uuid.UUID      `gorm:"type:uuid;index;not null"`
-	PeriodMonth      int            `gorm:"type:int;not null"`
-	PeriodYear       int            `gorm:"type:int;not null"`
-	GrossRevenue     int64          `gorm:"type:bigint;not null"`
-	VerifiedRevenue  *int64         `gorm:"type:bigint"`
-	ExpenseTotal     *int64         `gorm:"type:bigint"`
-	Note             *string        `gorm:"type:text"`
-	Status           string         `gorm:"type:varchar(50);default:'draft';not null"` // draft, submitted, verified, rejected, under_review
-	VerifiedBy       *uuid.UUID     `gorm:"type:uuid;index"`
-	CreatedAt        time.Time      `gorm:"not null"`
-	DeletedAt        gorm.DeletedAt `gorm:"index"`
+	ID              uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	CampaignID      uuid.UUID      `gorm:"type:uuid;index;not null"`
+	BusinessID      uuid.UUID      `gorm:"type:uuid;index;not null"`
+	PeriodMonth     int            `gorm:"type:int;not null"`
+	PeriodYear      int            `gorm:"type:int;not null"`
+	GrossRevenue    int64          `gorm:"type:bigint;not null"`
+	VerifiedRevenue *int64         `gorm:"type:bigint"`
+	ExpenseTotal    *int64         `gorm:"type:bigint"`
+	Note            *string        `gorm:"type:text"`
+	Status          string         `gorm:"type:varchar(50);default:'draft';not null"` // draft, submitted, verified, rejected, under_review
+	VerifiedBy      *uuid.UUID     `gorm:"type:uuid;index"`
+	CreatedAt       time.Time      `gorm:"not null"`
+	DeletedAt       gorm.DeletedAt `gorm:"index"`
 
 	// Relations
-	Campaign LoanCampaign `gorm:"foreignKey:CampaignID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
-	Business Business     `gorm:"foreignKey:BusinessID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
-	Verifier *User        `gorm:"foreignKey:VerifiedBy;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;"`
+	Campaign LoanCampaign         `gorm:"foreignKey:CampaignID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
+	Business Business             `gorm:"foreignKey:BusinessID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
+	Verifier *User                `gorm:"foreignKey:VerifiedBy;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;"`
 	Proofs   []RevenueReportProof `gorm:"foreignKey:RevenueReportID"`
 }
 
@@ -511,17 +544,17 @@ func (rrp *RevenueReportProof) BeforeCreate(tx *gorm.DB) (err error) {
 
 // 19. RepaymentSchedule
 type RepaymentSchedule struct {
-	ID               uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
-	CampaignID       uuid.UUID      `gorm:"type:uuid;index;not null"`
-	DueDate          time.Time      `gorm:"type:date;not null"`
-	PrincipalDue     int64          `gorm:"type:bigint;not null"`
-	MarginDue        *int64         `gorm:"type:bigint"`
-	RevenueShareDue  *int64         `gorm:"type:bigint"`
-	TotalDue         int64          `gorm:"type:bigint;not null"`
-	Status           string         `gorm:"type:varchar(50);default:'upcoming';not null"` // upcoming, due, paid, late, restructured
-	CreatedAt        time.Time      `gorm:"not null"`
-	UpdatedAt        time.Time      `gorm:"not null"`
-	DeletedAt        gorm.DeletedAt `gorm:"index"`
+	ID              uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	CampaignID      uuid.UUID      `gorm:"type:uuid;index;not null"`
+	DueDate         time.Time      `gorm:"type:date;not null"`
+	PrincipalDue    int64          `gorm:"type:bigint;not null"`
+	MarginDue       *int64         `gorm:"type:bigint"`
+	RevenueShareDue *int64         `gorm:"type:bigint"`
+	TotalDue        int64          `gorm:"type:bigint;not null"`
+	Status          string         `gorm:"type:varchar(50);default:'upcoming';not null"` // upcoming, due, paid, late, restructured
+	CreatedAt       time.Time      `gorm:"not null"`
+	UpdatedAt       time.Time      `gorm:"not null"`
+	DeletedAt       gorm.DeletedAt `gorm:"index"`
 
 	// Relations
 	Campaign LoanCampaign `gorm:"foreignKey:CampaignID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
@@ -540,16 +573,16 @@ func (rs *RepaymentSchedule) BeforeCreate(tx *gorm.DB) (err error) {
 
 // 20. Repayment
 type Repayment struct {
-	ID               uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
-	CampaignID       uuid.UUID      `gorm:"type:uuid;index;not null"`
-	ScheduleID       uuid.UUID      `gorm:"type:uuid;index;not null"`
-	PaidAmount       int64          `gorm:"type:bigint;not null"`
-	PrincipalPaid    int64          `gorm:"type:bigint;not null"`
-	BenefitPaid      int64          `gorm:"type:bigint;not null"`
-	PaymentProofURL  *string        `gorm:"type:text"`
-	Status           string         `gorm:"type:varchar(50);default:'pending';not null"` // pending, verified, rejected
-	PaidAt           time.Time      `gorm:"not null"`
-	DeletedAt        gorm.DeletedAt `gorm:"index"`
+	ID              uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	CampaignID      uuid.UUID      `gorm:"type:uuid;index;not null"`
+	ScheduleID      uuid.UUID      `gorm:"type:uuid;index;not null"`
+	PaidAmount      int64          `gorm:"type:bigint;not null"`
+	PrincipalPaid   int64          `gorm:"type:bigint;not null"`
+	BenefitPaid     int64          `gorm:"type:bigint;not null"`
+	PaymentProofURL *string        `gorm:"type:text"`
+	Status          string         `gorm:"type:varchar(50);default:'pending';not null"` // pending, verified, rejected
+	PaidAt          time.Time      `gorm:"not null"`
+	DeletedAt       gorm.DeletedAt `gorm:"index"`
 
 	// Relations
 	Campaign LoanCampaign      `gorm:"foreignKey:CampaignID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
@@ -687,10 +720,10 @@ func (al *AuditLog) BeforeCreate(tx *gorm.DB) (err error) {
 type StarterBusinessDetail struct {
 	ID                uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
 	BusinessID        uuid.UUID      `gorm:"type:uuid;uniqueIndex;not null"`
-	TargetMarket      string         `gorm:"type:text;not null"`             // Target pembeli awal
-	SupplierInfo      string         `gorm:"type:text;not null"`             // Sumber bahan baku / tempat beli alat
-	PricingEstimation string         `gorm:"type:text;not null"`             // Perkiraan harga modal dan jual
-	ReadinessProofURL *string        `gorm:"type:text"`                      // URL bukti kesiapan (foto contoh produk, lokasi, chat pembeli, dll.)
+	TargetMarket      string         `gorm:"type:text;not null"`                  // Target pembeli awal
+	SupplierInfo      string         `gorm:"type:text;not null"`                  // Sumber bahan baku / tempat beli alat
+	PricingEstimation string         `gorm:"type:text;not null"`                  // Perkiraan harga modal dan jual
+	ReadinessProofURL *string        `gorm:"type:text"`                           // URL bukti kesiapan (foto contoh produk, lokasi, chat pembeli, dll.)
 	CommitmentChecked bool           `gorm:"type:boolean;default:false;not null"` // Komitmen melakukan pencatatan keuangan setelah dana cair
 	CreatedAt         time.Time      `gorm:"not null"`
 	UpdatedAt         time.Time      `gorm:"not null"`
@@ -715,13 +748,13 @@ func (sbd *StarterBusinessDetail) BeforeCreate(tx *gorm.DB) (err error) {
 type RepaymentRestructuringRequest struct {
 	ID                  uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
 	CampaignID          uuid.UUID      `gorm:"type:uuid;index;not null"`
-	Reason              string         `gorm:"type:text;not null"`             // Alasan pengajuan
-	ProposedTenorMonths int            `gorm:"type:int;not null"`              // Tenor baru yang diusulkan
-	ProofURL            *string        `gorm:"type:text"`                      // Foto / dokumen bukti kondisi usaha saat ini
+	Reason              string         `gorm:"type:text;not null"`                          // Alasan pengajuan
+	ProposedTenorMonths int            `gorm:"type:int;not null"`                           // Tenor baru yang diusulkan
+	ProofURL            *string        `gorm:"type:text"`                                   // Foto / dokumen bukti kondisi usaha saat ini
 	Status              string         `gorm:"type:varchar(50);default:'pending';not null"` // pending, approved, rejected
-	AdminNote           *string        `gorm:"type:text"`                      // Catatan tinjauan admin
-	ApprovedBy          *uuid.UUID     `gorm:"type:uuid;index"`                // Admin yang menyetujui/menolak
-	ApprovedAt          *time.Time     `gorm:"type:timestamp"`                 // Waktu persetujuan
+	AdminNote           *string        `gorm:"type:text"`                                   // Catatan tinjauan admin
+	ApprovedBy          *uuid.UUID     `gorm:"type:uuid;index"`                             // Admin yang menyetujui/menolak
+	ApprovedAt          *time.Time     `gorm:"type:timestamp"`                              // Waktu persetujuan
 	CreatedAt           time.Time      `gorm:"not null"`
 	UpdatedAt           time.Time      `gorm:"not null"`
 	DeletedAt           gorm.DeletedAt `gorm:"index"`

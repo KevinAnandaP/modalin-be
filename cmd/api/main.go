@@ -16,6 +16,9 @@ import (
 func main() {
 	// 1. Load Configurations
 	config.LoadConfig()
+	if config.AppConfig.JWTSecret == "" {
+		log.Fatal("JWT_SECRET must be configured")
+	}
 
 	// 2. Connect Database
 	database.ConnectDB()
