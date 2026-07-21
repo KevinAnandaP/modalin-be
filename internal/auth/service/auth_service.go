@@ -16,19 +16,21 @@ import (
 )
 
 var (
-	ErrTermsNotAccepted       = errors.New("terms must be accepted")
-	ErrInvalidCredentials     = errors.New("invalid credentials")
-	ErrPasswordLength         = errors.New("password must be between 8 and 72 characters")
-	ErrUserInactive           = errors.New("user is not active")
-	ErrEmailTaken             = errors.New("email already registered")
-	ErrInvalidRole            = errors.New("role cannot be requested")
-	ErrRoleRequestExists      = errors.New("role request already open")
-	ErrIdentityCardRequired   = errors.New("identity card photo is required for this role")
-	ErrRiskAgreementRequired = errors.New("risk agreement must be accepted for lender role")
-	ErrEthicsAgreementRequired = errors.New("ethics agreement must be accepted for verifier role")
-	ErrTrainingRequired       = errors.New("mini-training must be completed for verifier role")
-	ErrRoleRequestNotFound    = errors.New("role request not found")
-	ErrInvalidAction          = errors.New("invalid review action")
+	ErrTermsNotAccepted        = errors.New("terms must be accepted")
+	ErrInvalidCredentials      = errors.New("invalid credentials")
+	ErrPasswordLength          = errors.New("password must be between 8 and 72 characters")
+	ErrUserInactive            = errors.New("user is not active")
+	ErrEmailTaken              = errors.New("email already registered")
+	ErrInvalidRole             = errors.New("role cannot be requested")
+	ErrRoleRequestExists       = errors.New("role request already open")
+	ErrIdentityCardRequired    = errors.New("identity card photo is required for this role")
+	ErrRiskAgreementRequired  = errors.New("risk agreement must be accepted for lender role")
+	ErrEthicsAgreementRequired  = errors.New("ethics agreement must be accepted for verifier role")
+	ErrTrainingRequired        = errors.New("mini-training must be completed for verifier role")
+	ErrRoleRequestNotFound     = errors.New("role request not found")
+	ErrInvalidAction           = errors.New("invalid review action")
+	ErrInvalidTempToken        = errors.New("invalid or expired temporary registration token")
+	ErrGoogleAuthFailed        = errors.New("invalid google auth credentials")
 )
 
 type RegisterInput struct {
@@ -58,6 +60,27 @@ type ReviewRoleRequestInput struct {
 	RequestID uuid.UUID `json:"request_id"`
 	Action    string    `json:"action"` // approve, reject, revision_required
 	AdminNote string    `json:"admin_note"`
+}
+
+type GooglePrefill struct {
+	Email    string `json:"email"`
+	FullName string `json:"full_name"`
+	GoogleID string `json:"google_id"`
+}
+
+type GoogleAuthResult struct {
+	IsNewUser   bool           `json:"is_new_user"`
+	Prefill     *GooglePrefill `json:"prefill,omitempty"`
+	TempToken   string         `json:"temp_token,omitempty"`
+	LoginResult *LoginResult   `json:"login_result,omitempty"`
+}
+
+type CompleteGoogleRegistrationInput struct {
+	TempToken     string `json:"temp_token"`
+	Phone         string `json:"phone"`
+	City          string `json:"city"`
+	Address       string `json:"address"`
+	TermsAccepted bool   `json:"terms_accepted"`
 }
 
 type AuthService struct {
@@ -121,6 +144,118 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (*Login
 	return s.issueToken(user.ID, roles)
 }
 
+func (s *AuthService) GoogleAuth(ctx context.Context, googleID, email, fullName string) (*GoogleAuthResult, error) {
+	googleID = strings.TrimSpace(googleID)
+	email = strings.ToLower(strings.TrimSpace(email))
+	fullName = strings.TrimSpace(fullName)
+
+	if googleID == "" || email == "" {
+		return nil, ErrGoogleAuthFailed
+	}
+
+	// 1. Try finding user by GoogleID
+	user, err := s.repo.FindUserByGoogleID(ctx, googleID)
+	if err == nil {
+		if user.Status != "active" {
+			return nil, ErrUserInactive
+		}
+		roles, err := s.repo.GetApprovedRoles(ctx, user.ID)
+		if err != nil {
+			return nil, err
+		}
+		loginRes, err := s.issueToken(user.ID, roles)
+		if err != nil {
+			return nil, err
+		}
+		return &GoogleAuthResult{IsNewUser: false, LoginResult: loginRes}, nil
+	}
+
+	// 2. Try finding user by Email
+	user, err = s.repo.FindUserByEmail(ctx, email)
+	if err == nil {
+		if user.Status != "active" {
+			return nil, ErrUserInactive
+		}
+		user.GoogleID = &googleID
+		_ = s.repo.CreateUser(ctx, user)
+		roles, err := s.repo.GetApprovedRoles(ctx, user.ID)
+		if err != nil {
+			return nil, err
+		}
+		loginRes, err := s.issueToken(user.ID, roles)
+		if err != nil {
+			return nil, err
+		}
+		return &GoogleAuthResult{IsNewUser: false, LoginResult: loginRes}, nil
+	}
+
+	// 3. New User - Issue temporary token for 2-step onboarding
+	tempToken, err := s.issueTempGoogleToken(googleID, email, fullName)
+	if err != nil {
+		return nil, err
+	}
+
+	return &GoogleAuthResult{
+		IsNewUser: true,
+		Prefill: &GooglePrefill{
+			Email:    email,
+			FullName: fullName,
+			GoogleID: googleID,
+		},
+		TempToken: tempToken,
+	}, nil
+}
+
+func (s *AuthService) CompleteGoogleRegistration(ctx context.Context, in CompleteGoogleRegistrationInput) (*LoginResult, error) {
+	if !in.TermsAccepted {
+		return nil, ErrTermsNotAccepted
+	}
+	if strings.TrimSpace(in.Phone) == "" || strings.TrimSpace(in.City) == "" || strings.TrimSpace(in.Address) == "" {
+		return nil, errors.New("phone, city, and address are required to complete registration")
+	}
+
+	prefill, err := s.parseTempGoogleToken(in.TempToken)
+	if err != nil {
+		return nil, ErrInvalidTempToken
+	}
+
+	_, err = s.repo.FindUserByEmail(ctx, prefill.Email)
+	if err == nil {
+		return nil, ErrEmailTaken
+	}
+
+	randomPassword := uuid.New().String()
+	hash, err := bcrypt.GenerateFromPassword([]byte(randomPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now().UTC()
+	user := &model.User{
+		FullName:        prefill.FullName,
+		Email:           prefill.Email,
+		Phone:           strings.TrimSpace(in.Phone),
+		PasswordHash:    string(hash),
+		City:            strings.TrimSpace(in.City),
+		Address:         strings.TrimSpace(in.Address),
+		Status:          "active",
+		GoogleID:        &prefill.GoogleID,
+		TermsAcceptedAt: &now,
+		TermsVersion:    "v1",
+	}
+
+	if err := s.repo.CreateUser(ctx, user); err != nil {
+		return nil, err
+	}
+
+	roles, err := s.repo.GetApprovedRoles(ctx, user.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.issueToken(user.ID, roles)
+}
+
 func (s *AuthService) Profile(ctx context.Context, id uuid.UUID) (*Profile, error) {
 	user, err := s.repo.FindUserByID(ctx, id)
 	if err != nil {
@@ -150,7 +285,6 @@ func (s *AuthService) RequestRole(ctx context.Context, userID uuid.UUID, in Requ
 		return nil, ErrInvalidRole
 	}
 
-	// Validate role-specific requirements
 	if roleName == "lender" {
 		if in.IdentityCardURL == nil || strings.TrimSpace(*in.IdentityCardURL) == "" {
 			return nil, ErrIdentityCardRequired
@@ -256,4 +390,45 @@ func (s *AuthService) issueToken(userID uuid.UUID, roles []string) (*LoginResult
 		return nil, err
 	}
 	return &LoginResult{Token: token, ExpiresAt: expires}, nil
+}
+
+func (s *AuthService) issueTempGoogleToken(googleID, email, fullName string) (string, error) {
+	now := time.Now().UTC()
+	expires := now.Add(30 * time.Minute)
+	claims := jwt.MapClaims{
+		"google_id": googleID,
+		"email":     email,
+		"full_name": fullName,
+		"iss":       "modalin-be-google-temp",
+		"iat":       now.Unix(),
+		"exp":       expires.Unix(),
+	}
+	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(s.secret)
+}
+
+func (s *AuthService) parseTempGoogleToken(tempToken string) (*GooglePrefill, error) {
+	claims := jwt.MapClaims{}
+	token, err := jwt.ParseWithClaims(tempToken, claims, func(token *jwt.Token) (interface{}, error) {
+		if token.Method != jwt.SigningMethodHS256 {
+			return nil, ErrInvalidTempToken
+		}
+		return s.secret, nil
+	})
+	if err != nil || !token.Valid || claims["iss"] != "modalin-be-google-temp" {
+		return nil, ErrInvalidTempToken
+	}
+
+	googleID, _ := claims["google_id"].(string)
+	email, _ := claims["email"].(string)
+	fullName, _ := claims["full_name"].(string)
+
+	if googleID == "" || email == "" {
+		return nil, ErrInvalidTempToken
+	}
+
+	return &GooglePrefill{
+		GoogleID: googleID,
+		Email:    email,
+		FullName: fullName,
+	}, nil
 }

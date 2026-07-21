@@ -17,6 +17,7 @@ type User struct {
 	City            string         `gorm:"type:varchar(100);not null"`
 	Address         string         `gorm:"type:text;not null"`
 	Status          string         `gorm:"type:varchar(50);default:'active';not null"` // active, suspended, blocked
+	GoogleID        *string        `gorm:"type:varchar(255);uniqueIndex"`
 	TermsAcceptedAt *time.Time     `gorm:"type:timestamp"`
 	TermsVersion    string         `gorm:"type:varchar(50)"`
 	CreatedAt       time.Time      `gorm:"not null"`
@@ -123,11 +124,12 @@ func (BusinessCategory) TableName() string {
 // 5. Business
 type Business struct {
 	ID                    uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
-	UserID                uuid.UUID      `gorm:"type:uuid;uniqueIndex;not null"`
+	UserID                uuid.UUID      `gorm:"type:uuid;index;not null"`
 	BusinessName          string         `gorm:"type:varchar(255);not null"`
 	CategoryID            int            `gorm:"index;not null"`
 	Description           string         `gorm:"type:text;not null"`
-	BusinessType          string         `gorm:"type:varchar(50);not null"` // running, starter
+	BusinessType          string         `gorm:"type:varchar(50);not null"`                  // running, starter
+	Status                string         `gorm:"type:varchar(50);default:'active';not null"` // active, inactive
 	StartedAt             *time.Time     `gorm:"type:date"`
 	LocationAddress       string         `gorm:"type:text;not null"`
 	Latitude              *float64       `gorm:"type:decimal(10,8)"`

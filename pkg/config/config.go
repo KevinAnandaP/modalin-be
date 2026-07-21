@@ -17,6 +17,7 @@ type Config struct {
 	DBSSLMode  string
 	DBTimeZone string
 	JWTSecret  string
+	UploadDir  string
 }
 
 var AppConfig *Config
@@ -38,6 +39,7 @@ func LoadConfig() {
 		DBSSLMode:  getEnv("DB_SSLMODE", "disable"),
 		DBTimeZone: getEnv("DB_TIMEZONE", "Asia/Jakarta"),
 		JWTSecret:  getEnv("JWT_SECRET", ""),
+		UploadDir:  getEnv("UPLOAD_DIR", "uploads"),
 	}
 }
 

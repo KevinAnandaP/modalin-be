@@ -34,10 +34,15 @@ services:
       DB_NAME: modalin-db
       DB_SSLMODE: disable
       DB_TIMEZONE: Asia/Jakarta
+      UPLOAD_DIR: /app/uploads
     depends_on:
       db:
         condition: service_healthy
+    volumes:
+      - uploads_data:/app/uploads
 
 volumes:
   postgres_data:
+    driver: local
+  uploads_data:
     driver: local

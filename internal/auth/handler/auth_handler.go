@@ -72,6 +72,44 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"data": result})
 }
 
+func (h *AuthHandler) GoogleAuth(c *fiber.Ctx) error {
+	var req struct {
+		GoogleID string `json:"google_id"`
+		Email    string `json:"email"`
+		FullName string `json:"full_name"`
+	}
+	if err := c.BodyParser(&req); err != nil || req.GoogleID == "" || req.Email == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "google_id and email are required"})
+	}
+	res, err := h.service.GoogleAuth(c.Context(), req.GoogleID, req.Email, req.FullName)
+	if err != nil {
+		if errors.Is(err, service.ErrUserInactive) {
+			return c.Status(403).JSON(fiber.Map{"error": "account is not active"})
+		}
+		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(fiber.Map{"data": res})
+}
+
+func (h *AuthHandler) CompleteGoogleAuth(c *fiber.Ctx) error {
+	var req service.CompleteGoogleRegistrationInput
+	if err := c.BodyParser(&req); err != nil || req.TempToken == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "temp_token, phone, city, and address are required"})
+	}
+	res, err := h.service.CompleteGoogleRegistration(c.Context(), req)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrTermsNotAccepted), errors.Is(err, service.ErrInvalidTempToken):
+			return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+		case errors.Is(err, service.ErrEmailTaken):
+			return c.Status(409).JSON(fiber.Map{"error": err.Error()})
+		default:
+			return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+		}
+	}
+	return c.Status(201).JSON(fiber.Map{"data": res})
+}
+
 func (h *AuthHandler) Me(c *fiber.Ctx) error {
 	userID, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {
