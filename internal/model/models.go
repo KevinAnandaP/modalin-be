@@ -352,7 +352,9 @@ type CampaignBudgetItem struct {
 	ItemName       string    `gorm:"type:varchar(255);not null"`
 	Category       string    `gorm:"type:varchar(50);not null"` // equipment, stock, packaging, transport, marketing, other
 	Amount         int64     `gorm:"type:bigint;not null"`
-	PurchaseMethod string    `gorm:"type:varchar(50);not null"` // direct_purchase, cash_limited
+	PriorityLevel  string    `gorm:"type:varchar(10)"`            // high, medium, low; legacy items remain NULL until revised
+	EntryOrder     int       `gorm:"type:int;default:0;not null"` // stable tie-breaker when priorities match
+	PurchaseMethod string    `gorm:"type:varchar(50);not null"`   // direct_purchase, cash_limited
 	Note           *string   `gorm:"type:text"`
 
 	// Relations
@@ -372,17 +374,19 @@ func (cbi *CampaignBudgetItem) BeforeCreate(tx *gorm.DB) (err error) {
 
 // 13. CampaignMilestone
 type CampaignMilestone struct {
-	ID         uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
-	CampaignID uuid.UUID      `gorm:"type:uuid;index;not null"`
-	Title      string         `gorm:"type:varchar(255);not null"`
-	Amount     int64          `gorm:"type:bigint;not null"`
-	SequenceNo int            `gorm:"type:int;not null"`
-	Status     string         `gorm:"type:varchar(50);default:'locked';not null"` // locked, available, disbursed, verified, rejected
-	DueDate    *time.Time     `gorm:"type:date"`
-	DeletedAt  gorm.DeletedAt `gorm:"index"`
+	ID           uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	CampaignID   uuid.UUID      `gorm:"type:uuid;index;not null"`
+	BudgetItemID *uuid.UUID     `gorm:"type:uuid;uniqueIndex"` // nullable only for legacy manually-created milestones
+	Title        string         `gorm:"type:varchar(255);not null"`
+	Amount       int64          `gorm:"type:bigint;not null"`
+	SequenceNo   int            `gorm:"type:int;not null"`
+	Status       string         `gorm:"type:varchar(50);default:'locked';not null"` // locked, available, disbursed, verified, rejected
+	DueDate      *time.Time     `gorm:"type:date"`
+	DeletedAt    gorm.DeletedAt `gorm:"index"`
 
 	// Relations
-	Campaign LoanCampaign `gorm:"foreignKey:CampaignID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
+	Campaign   LoanCampaign       `gorm:"foreignKey:CampaignID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
+	BudgetItem CampaignBudgetItem `gorm:"foreignKey:BudgetItemID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
 }
 
 func (CampaignMilestone) TableName() string {

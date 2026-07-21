@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 
+	campaignJob "modalin-be/internal/campaign/job"
 	"modalin-be/internal/router"
 	"modalin-be/pkg/config"
 	"modalin-be/pkg/database"
@@ -22,6 +23,7 @@ func main() {
 
 	// 2. Connect Database
 	database.ConnectDB()
+	campaignJob.StartMilestoneUnlockScheduler(database.DB)
 
 	// 3. Initialize Fiber Application
 	app := fiber.New(fiber.Config{
