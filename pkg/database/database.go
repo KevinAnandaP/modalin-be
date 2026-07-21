@@ -81,6 +81,14 @@ func ConnectDB() {
 	if err != nil {
 		log.Fatalf("Failed to run database migrations: %v", err)
 	}
+	// Campaigns created before priority levels were introduced require borrower revision.
+	if err := db.Exec(`UPDATE loan_campaigns SET status = 'needs_revision'
+		WHERE status IN ('draft', 'rejected', 'admin_review')
+		AND EXISTS (SELECT 1 FROM campaign_budget_items
+			WHERE campaign_budget_items.campaign_id = loan_campaigns.id
+			AND (priority_level IS NULL OR priority_level NOT IN ('high', 'medium', 'low')))`).Error; err != nil {
+		log.Fatalf("Failed to mark legacy campaigns for revision: %v", err)
+	}
 	// GORM cannot express PostgreSQL partial unique indexes. This allows a user to
 	// keep historical inactive businesses while enforcing exactly one active business.
 	if err := db.Exec("DROP INDEX IF EXISTS idx_businesses_user_id").Error; err != nil {

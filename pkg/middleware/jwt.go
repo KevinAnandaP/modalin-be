@@ -19,7 +19,7 @@ func JWTProtected(secret string) fiber.Handler {
 		token, err := jwt.ParseWithClaims(parts[1], claims, func(token *jwt.Token) (interface{}, error) {
 			if token.Method != jwt.SigningMethodHS256 {
 				return nil, fiber.ErrUnauthorized
-			}
+			}       
 			return []byte(secret), nil
 		})
 		if err != nil || !token.Valid || claims["iss"] != "modalin-be" {

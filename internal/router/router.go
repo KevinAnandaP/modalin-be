@@ -8,6 +8,9 @@ import (
 	businessRepository "modalin-be/internal/business/repository"
 	businessService "modalin-be/internal/business/service"
 	businessStorage "modalin-be/internal/business/storage"
+	campaignHandler "modalin-be/internal/campaign/handler"
+	campaignRepository "modalin-be/internal/campaign/repository"
+	campaignService "modalin-be/internal/campaign/service"
 	healthHandler "modalin-be/internal/health/handler"
 	"modalin-be/pkg/config"
 	"modalin-be/pkg/database"
@@ -29,6 +32,7 @@ func SetupRoutes(app *fiber.App) {
 	health := healthHandler.NewHealthHandler()
 	auth := authHandler.NewAuthHandler(authService.NewAuthService(authRepository.NewAuthRepository(database.DB), config.AppConfig.JWTSecret))
 	business := businessHandler.NewBusinessHandler(businessService.NewBusinessService(businessRepository.NewBusinessRepository(database.DB)), businessStorage.NewLocalProofStorage(config.AppConfig.UploadDir, "/uploads"))
+	campaign := campaignHandler.NewCampaignHandler(campaignService.NewCampaignService(campaignRepository.NewCampaignRepository(database.DB)))
 
 	// Register Routes
 	app.Get("/health", health.CheckHealth)
@@ -74,4 +78,20 @@ func SetupRoutes(app *fiber.App) {
 	finRoutes.Put("/:id", business.UpdateFinancialRecord)
 	finRoutes.Post("/:id/proofs", business.UploadFinancialRecordProof)
 	finRoutes.Delete("/:id", business.DeleteFinancialRecord)
+
+	// Loan campaign management (borrower) and public catalogue.
+	v1.Get("/campaigns", campaign.Catalog)
+	campaignRoutes := v1.Group("/campaigns", middleware.JWTProtected(config.AppConfig.JWTSecret), middleware.RequireRole("borrower"))
+	campaignRoutes.Post("/", campaign.Create)
+	campaignRoutes.Get("/me", campaign.ListMine)
+	campaignRoutes.Get("/:id", campaign.GetMine)
+	campaignRoutes.Put("/:id", campaign.Update)
+	campaignRoutes.Delete("/:id", campaign.Delete)
+	campaignRoutes.Post("/:id/submit", campaign.Submit)
+	campaignRoutes.Post("/:id/budget-items", campaign.CreateBudget)
+	campaignRoutes.Get("/:id/budget-items", campaign.ListBudget)
+	campaignRoutes.Put("/:id/budget-items/:budgetID", campaign.UpdateBudget)
+	campaignRoutes.Delete("/:id/budget-items/:budgetID", campaign.DeleteBudget)
+	campaignRoutes.Get("/:id/milestones", campaign.ListMilestones)
+	adminRoutes.Post("/campaigns/:id/review", campaign.Review)
 }
