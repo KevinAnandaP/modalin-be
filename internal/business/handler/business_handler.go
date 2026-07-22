@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"net/http"
 	"strconv"
 
 	"modalin-be/internal/business/service"
@@ -94,6 +95,27 @@ func (h *BusinessHandler) UploadFinancialRecordProof(c *fiber.Ctx) error {
 		return h.financialRecordError(c, err, "failed to attach proof")
 	}
 	return c.Status(201).JSON(fiber.Map{"data": proof})
+}
+func (h *BusinessHandler) DownloadFinancialRecordProof(c *fiber.Ctx) error {
+	userID, ok := c.Locals("user_id").(uuid.UUID)
+	if !ok {
+		return c.Status(401).JSON(fiber.Map{"error": "invalid authorization context"})
+	}
+	proofID, err := uuid.Parse(c.Params("proofID"))
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid proof id"})
+	}
+	url, err := h.service.FinancialProofFileURL(c.Context(), userID, proofID)
+	if err != nil {
+		return h.financialRecordError(c, err, "failed to fetch proof")
+	}
+	data, err := h.proofStorage.Read(url)
+	if err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": "proof file not found"})
+	}
+	c.Set(fiber.HeaderContentType, http.DetectContentType(data))
+	c.Set(fiber.HeaderContentDisposition, "attachment; filename=financial-proof")
+	return c.Send(data)
 }
 
 func (h *BusinessHandler) financialRecordError(c *fiber.Ctx, err error, fallback string) error {

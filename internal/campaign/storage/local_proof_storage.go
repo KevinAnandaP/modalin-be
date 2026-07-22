@@ -17,10 +17,7 @@ const maxProofFileSize = 5 * 1024 * 1024
 
 var ErrUnsupportedProofFile = errors.New("proof must be a PNG, JPEG, or PDF file up to 5 MB")
 
-type LocalProofStorage struct {
-	directory string
-	urlPrefix string
-}
+type LocalProofStorage struct{ directory, urlPrefix string }
 
 func NewLocalProofStorage(directory, urlPrefix string) *LocalProofStorage {
 	return &LocalProofStorage{directory: directory, urlPrefix: strings.TrimRight(urlPrefix, "/")}
@@ -35,22 +32,19 @@ func (s *LocalProofStorage) Store(fileHeader *multipart.FileHeader) (string, err
 		return "", err
 	}
 	defer source.Close()
-
 	header := make([]byte, 512)
 	n, err := source.Read(header)
 	if err != nil && err != io.EOF {
 		return "", err
 	}
-	contentType := http.DetectContentType(header[:n])
-	extension := extensionForContentType(contentType)
+	extension := extensionForContentType(http.DetectContentType(header[:n]))
 	if extension == "" {
 		return "", ErrUnsupportedProofFile
 	}
 	if _, err := source.Seek(0, io.SeekStart); err != nil {
 		return "", err
 	}
-
-	targetDir := filepath.Join(s.directory, "financial-proofs")
+	targetDir := filepath.Join(s.directory, "fund-usage-proofs")
 	if err := os.MkdirAll(targetDir, 0750); err != nil {
 		return "", err
 	}
@@ -61,7 +55,6 @@ func (s *LocalProofStorage) Store(fileHeader *multipart.FileHeader) (string, err
 		return "", err
 	}
 	defer target.Close()
-
 	written, err := io.Copy(target, io.LimitReader(source, maxProofFileSize+1))
 	if err != nil {
 		_ = os.Remove(targetPath)
@@ -71,11 +64,11 @@ func (s *LocalProofStorage) Store(fileHeader *multipart.FileHeader) (string, err
 		_ = os.Remove(targetPath)
 		return "", ErrUnsupportedProofFile
 	}
-	return s.urlPrefix + "/financial-proofs/" + filename, nil
+	return s.urlPrefix + "/fund-usage-proofs/" + filename, nil
 }
 
 func (s *LocalProofStorage) Delete(publicURL string) error {
-	prefix := s.urlPrefix + "/financial-proofs/"
+	prefix := s.urlPrefix + "/fund-usage-proofs/"
 	if !strings.HasPrefix(publicURL, prefix) {
 		return nil
 	}
@@ -83,13 +76,13 @@ func (s *LocalProofStorage) Delete(publicURL string) error {
 	if filename == "" || filepath.Base(filename) != filename {
 		return errors.New("invalid proof file URL")
 	}
-	if err := os.Remove(filepath.Join(s.directory, "financial-proofs", filename)); err != nil && !os.IsNotExist(err) {
+	if err := os.Remove(filepath.Join(s.directory, "fund-usage-proofs", filename)); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	return nil
 }
 func (s *LocalProofStorage) Read(publicURL string) ([]byte, error) {
-	prefix := s.urlPrefix + "/financial-proofs/"
+	prefix := s.urlPrefix + "/fund-usage-proofs/"
 	if !strings.HasPrefix(publicURL, prefix) {
 		return nil, errors.New("invalid proof file URL")
 	}
@@ -97,7 +90,7 @@ func (s *LocalProofStorage) Read(publicURL string) ([]byte, error) {
 	if filename == "" || filepath.Base(filename) != filename {
 		return nil, errors.New("invalid proof file URL")
 	}
-	return os.ReadFile(filepath.Join(s.directory, "financial-proofs", filename))
+	return os.ReadFile(filepath.Join(s.directory, "fund-usage-proofs", filename))
 }
 
 func extensionForContentType(contentType string) string {

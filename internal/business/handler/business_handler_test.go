@@ -76,6 +76,14 @@ func (r *handlerRepo) CreateFinancialRecordProof(_ context.Context, proof *model
 	r.proofs = append(r.proofs, proof)
 	return nil
 }
+func (r *handlerRepo) GetFinancialRecordProof(_ context.Context, proofID, _ uuid.UUID) (*model.FinancialRecordProof, error) {
+	for _, proof := range r.proofs {
+		if proof.ID == proofID {
+			return proof, nil
+		}
+	}
+	return nil, gorm.ErrRecordNotFound
+}
 func (r *handlerRepo) GetFinancialSummary(_ context.Context, _ uuid.UUID, _, _ int) (*repository.FinancialSummary, error) {
 	return &repository.FinancialSummary{}, nil
 }

@@ -79,6 +79,9 @@ func (r *fakeBusinessRepo) UpdateFinancialRecord(_ context.Context, record *mode
 func (r *fakeBusinessRepo) CreateFinancialRecordProof(_ context.Context, _ *model.FinancialRecordProof) error {
 	return nil
 }
+func (r *fakeBusinessRepo) GetFinancialRecordProof(_ context.Context, _, _ uuid.UUID) (*model.FinancialRecordProof, error) {
+	return nil, gorm.ErrRecordNotFound
+}
 
 func (r *fakeBusinessRepo) GetFinancialSummary(_ context.Context, _ uuid.UUID, _, _ int) (*repository.FinancialSummary, error) {
 	var income, expense int64

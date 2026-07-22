@@ -430,7 +430,7 @@ func (f *Funding) BeforeCreate(tx *gorm.DB) (err error) {
 type Disbursement struct {
 	ID            uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
 	CampaignID    uuid.UUID      `gorm:"type:uuid;index;not null"`
-	MilestoneID   uuid.UUID      `gorm:"type:uuid;index;not null"`
+	MilestoneID   uuid.UUID      `gorm:"type:uuid;uniqueIndex;not null"`
 	Amount        int64          `gorm:"type:bigint;not null"`
 	Method        string         `gorm:"type:varchar(50);not null"` // direct_purchase, cash_limited, bank_transfer, ewallet
 	RecipientType string         `gorm:"type:varchar(50);not null"` // borrower, merchant
@@ -459,7 +459,7 @@ func (d *Disbursement) BeforeCreate(tx *gorm.DB) (err error) {
 // 16. FundUsageProof
 type FundUsageProof struct {
 	ID             uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
-	DisbursementID uuid.UUID      `gorm:"type:uuid;index;not null"`
+	DisbursementID uuid.UUID      `gorm:"type:uuid;uniqueIndex:idx_active_disbursement_proof,where:deleted_at IS NULL;not null"`
 	CampaignID     uuid.UUID      `gorm:"type:uuid;index;not null"`
 	FileURL        string         `gorm:"type:text;not null"`
 	ProofType      string         `gorm:"type:varchar(50);not null"` // invoice, receipt, photo, merchant_confirmation

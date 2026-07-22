@@ -16,15 +16,14 @@ func ProofQualifiesForUnlock(status string, createdAt, now time.Time) bool {
 	switch strings.ToLower(strings.TrimSpace(status)) {
 	case "approved":
 		return true
-	case "pending":
-		return !createdAt.After(now.Add(-5 * time.Hour))
 	default:
 		return false
 	}
 }
 
-// StartMilestoneUnlockScheduler checks pending proofs regularly. A proof-review
-// handler can call UnlockEligibleMilestones immediately after approval as well.
+// StartMilestoneUnlockScheduler reconciles milestones that have an approved proof.
+// It is intentionally not started by the API: approval releases the next
+// milestone synchronously in the campaign service.
 func StartMilestoneUnlockScheduler(db *gorm.DB) {
 	go func() {
 		if _, err := UnlockEligibleMilestones(context.Background(), db, time.Now().UTC()); err != nil {
@@ -59,7 +58,7 @@ func UnlockEligibleMilestones(ctx context.Context, db *gorm.DB, now time.Time) (
 			WHERE disbursement.milestone_id = previous.id
 			  AND disbursement.deleted_at IS NULL
 			  AND proof.deleted_at IS NULL
-			  AND (proof.status = 'approved' OR (proof.status = 'pending' AND proof.created_at <= ?))
-		  )`, now.Add(-5*time.Hour))
+			  AND proof.status = 'approved'
+		  )`)
 	return result.RowsAffected, result.Error
 }

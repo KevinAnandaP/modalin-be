@@ -356,6 +356,23 @@ func (s *BusinessService) AddFinancialRecordProof(ctx context.Context, userID, r
 	}
 	return proof, nil
 }
+func (s *BusinessService) FinancialProofFileURL(ctx context.Context, userID, proofID uuid.UUID) (string, error) {
+	b, err := s.repo.GetBusinessByUserID(ctx, userID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", ErrBusinessNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+	proof, err := s.repo.GetFinancialRecordProof(ctx, proofID, b.ID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", ErrFinancialRecordNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+	return proof.FileURL, nil
+}
 
 func (s *BusinessService) GetFinancialSummary(ctx context.Context, userID uuid.UUID, month, year int) (*repository.FinancialSummary, error) {
 	business, err := s.repo.GetBusinessByUserID(ctx, userID)

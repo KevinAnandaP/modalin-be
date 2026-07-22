@@ -26,6 +26,7 @@ type Repository interface {
 	GetFinancialRecordByID(ctx context.Context, recordID uuid.UUID, businessID uuid.UUID) (*model.FinancialRecord, error)
 	UpdateFinancialRecord(ctx context.Context, record *model.FinancialRecord) error
 	CreateFinancialRecordProof(ctx context.Context, proof *model.FinancialRecordProof) error
+	GetFinancialRecordProof(ctx context.Context, proofID, businessID uuid.UUID) (*model.FinancialRecordProof, error)
 	GetFinancialSummary(ctx context.Context, businessID uuid.UUID, month, year int) (*FinancialSummary, error)
 	CountDistinctFinancialRecordMonths(ctx context.Context, businessID uuid.UUID) (int, error)
 	DeleteFinancialRecord(ctx context.Context, recordID uuid.UUID, businessID uuid.UUID) error
@@ -158,6 +159,11 @@ func (r *BusinessRepository) UpdateFinancialRecord(ctx context.Context, record *
 
 func (r *BusinessRepository) CreateFinancialRecordProof(ctx context.Context, proof *model.FinancialRecordProof) error {
 	return r.db.WithContext(ctx).Create(proof).Error
+}
+func (r *BusinessRepository) GetFinancialRecordProof(ctx context.Context, proofID, businessID uuid.UUID) (*model.FinancialRecordProof, error) {
+	var proof model.FinancialRecordProof
+	err := r.db.WithContext(ctx).Joins("JOIN financial_records ON financial_records.id = financial_record_proofs.financial_record_id").Where("financial_record_proofs.id = ? AND financial_records.business_id = ?", proofID, businessID).First(&proof).Error
+	return &proof, err
 }
 
 func (r *BusinessRepository) GetFinancialSummary(ctx context.Context, businessID uuid.UUID, month, year int) (*FinancialSummary, error) {

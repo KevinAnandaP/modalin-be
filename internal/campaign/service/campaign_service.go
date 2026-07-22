@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sort"
 	"strings"
@@ -27,6 +28,17 @@ var (
 	ErrIncompleteCampaignPlan  = errors.New("budget and milestone totals must each equal the requested amount")
 	ErrInvalidReviewDecision   = errors.New("review decision must be publish or reject")
 	ErrCampaignNeedsRevision   = errors.New("campaign needs revision: assign high, medium, or low priority to every budget item")
+	ErrSelfFunding             = errors.New("campaign owner cannot fund their own campaign")
+	ErrFundingUnavailable      = errors.New("campaign is not accepting funding")
+	ErrInvalidFundingAmount    = errors.New("funding amount must be positive")
+	ErrFundingExceedsTarget    = errors.New("funding amount exceeds campaign target")
+	ErrDisbursementNotFound    = errors.New("disbursement not found")
+	ErrFundUsageProofNotFound  = errors.New("fund usage proof not found")
+	ErrInvalidFundUsageProof   = errors.New("file URL, supported proof type, and positive amount are required")
+	ErrInvalidProofReview      = errors.New("proof review decision must be approve, reject, or revision_needed")
+	ErrProofReviewUnavailable  = errors.New("fund usage proof is not pending review")
+	ErrProofAccessDenied       = errors.New("not authorized to access fund usage proof")
+	ErrProofAlreadySubmitted   = errors.New("fund usage proof is already awaiting review or approved")
 )
 
 type CampaignInput struct {
@@ -53,6 +65,12 @@ type MilestoneInput struct {
 	Amount     int64      `json:"amount"`
 	SequenceNo int        `json:"sequence_no"`
 	DueDate    *time.Time `json:"due_date"`
+}
+type FundUsageProofInput struct {
+	FileURL   string  `json:"file_url"`
+	ProofType string  `json:"proof_type"`
+	Amount    int64   `json:"amount"`
+	Note      *string `json:"note"`
 }
 type CampaignService struct{ repo repository.Repository }
 
@@ -282,6 +300,258 @@ func (s *CampaignService) DeleteMilestone(ctx context.Context, userID, campaignI
 func (s *CampaignService) GetCatalog(ctx context.Context, f repository.CatalogFilter) ([]model.LoanCampaign, error) {
 	return s.repo.ListCatalog(ctx, f)
 }
+func (s *CampaignService) ListLenderFundings(ctx context.Context, userID uuid.UUID) ([]model.Funding, error) {
+	return s.repo.ListFundingsForLender(ctx, userID)
+}
+func (s *CampaignService) ListOwnDisbursements(ctx context.Context, userID, campaignID uuid.UUID) ([]model.Disbursement, error) {
+	if _, _, err := s.owned(ctx, userID, campaignID); err != nil {
+		return nil, err
+	}
+	return s.repo.ListDisbursements(ctx, campaignID)
+}
+func (s *CampaignService) ListFundUsageProofs(ctx context.Context, status string, limit, offset int) ([]model.FundUsageProof, error) {
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	return s.repo.ListFundUsageProofs(ctx, status, limit, offset)
+}
+func (s *CampaignService) ProofFileURL(ctx context.Context, userID, campaignID, proofID uuid.UUID, roles []string) (string, error) {
+	proof, err := s.repo.GetFundUsageProof(ctx, proofID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", ErrFundUsageProofNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+	if proof.CampaignID != campaignID {
+		return "", ErrFundUsageProofNotFound
+	}
+	for _, role := range roles {
+		if role == "admin" {
+			return proof.FileURL, nil
+		}
+	}
+	if _, _, err := s.owned(ctx, userID, campaignID); err == nil {
+		return proof.FileURL, nil
+	}
+	funded, err := s.repo.HasPaidFunding(ctx, campaignID, userID)
+	if err != nil {
+		return "", err
+	}
+	if !funded {
+		return "", ErrProofAccessDenied
+	}
+	return proof.FileURL, nil
+}
+func (s *CampaignService) Pledge(ctx context.Context, lenderID, campaignID uuid.UUID, amount int64) (*model.Funding, error) {
+	if amount <= 0 {
+		return nil, ErrInvalidFundingAmount
+	}
+	var funding *model.Funding
+	err := s.repo.WithTransaction(ctx, func(repo repository.Repository) error {
+		c, err := repo.GetCampaignByIDForUpdate(ctx, campaignID)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrCampaignNotFound
+		}
+		if err != nil {
+			return err
+		}
+		business, err := repo.GetBusinessByID(ctx, c.BusinessID)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrCampaignNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if business.UserID == lenderID {
+			return ErrSelfFunding
+		}
+		if c.Status != "published" {
+			return ErrFundingUnavailable
+		}
+		if amount > c.RequestedAmount-c.FundedAmount {
+			return ErrFundingExceedsTarget
+		}
+
+		now := time.Now().UTC()
+		funding = &model.Funding{CampaignID: c.ID, LenderUserID: lenderID, Amount: amount, Status: "paid", FundedAt: now}
+		if err := repo.CreateFunding(ctx, funding); err != nil {
+			return err
+		}
+		if err := audit(ctx, repo, &lenderID, "funding.created", "funding", funding.ID, nil, map[string]any{"campaign_id": c.ID, "amount": amount, "status": funding.Status}); err != nil {
+			return err
+		}
+		c.FundedAmount += amount
+		if c.FundedAmount == c.RequestedAmount {
+			c.Status = "funded"
+		}
+		if err := repo.UpdateCampaign(ctx, c); err != nil {
+			return err
+		}
+		if c.Status != "funded" {
+			return nil
+		}
+		if err := s.releaseNextMilestone(ctx, repo, c); err != nil {
+			return err
+		}
+		c.Status = "active"
+		return repo.UpdateCampaign(ctx, c)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return funding, nil
+}
+func (s *CampaignService) SubmitFundUsageProof(ctx context.Context, userID, campaignID, disbursementID uuid.UUID, in FundUsageProofInput) (*model.FundUsageProof, error) {
+	if !validFundUsageProof(in) {
+		return nil, ErrInvalidFundUsageProof
+	}
+	if _, _, err := s.owned(ctx, userID, campaignID); err != nil {
+		return nil, err
+	}
+	d, err := s.repo.GetDisbursement(ctx, disbursementID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrDisbursementNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if d.CampaignID != campaignID || d.Status != "proof_required" {
+		return nil, ErrInvalidStatusTransition
+	}
+	if in.Amount != d.Amount {
+		return nil, ErrInvalidFundUsageProof
+	}
+	var proof *model.FundUsageProof
+	err = s.repo.WithTransaction(ctx, func(repo repository.Repository) error {
+		existing, err := repo.GetActiveFundUsageProof(ctx, d.ID)
+		if err == nil {
+			if existing.Status == "pending" || existing.Status == "approved" {
+				return ErrProofAlreadySubmitted
+			}
+			if err := repo.DeleteFundUsageProof(ctx, existing.ID); err != nil {
+				return err
+			}
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		proof = &model.FundUsageProof{DisbursementID: d.ID, CampaignID: campaignID, FileURL: strings.TrimSpace(in.FileURL), ProofType: strings.ToLower(strings.TrimSpace(in.ProofType)), Amount: in.Amount, Note: in.Note, Status: "pending"}
+		if err := repo.CreateFundUsageProof(ctx, proof); err != nil {
+			return err
+		}
+		return audit(ctx, repo, &userID, "fund_usage_proof.submitted", "fund_usage_proof", proof.ID, nil, map[string]any{"disbursement_id": d.ID, "amount": proof.Amount, "status": proof.Status})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return proof, nil
+}
+func (s *CampaignService) ReviewFundUsageProof(ctx context.Context, adminID, proofID uuid.UUID, decision string) error {
+	decision = strings.ToLower(strings.TrimSpace(decision))
+	if decision != "approve" && decision != "reject" && decision != "revision_needed" {
+		return ErrInvalidProofReview
+	}
+	return s.repo.WithTransaction(ctx, func(repo repository.Repository) error {
+		proof, err := repo.GetFundUsageProofForUpdate(ctx, proofID)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrFundUsageProofNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if proof.Status != "pending" {
+			return ErrProofReviewUnavailable
+		}
+		d, err := repo.GetDisbursementForUpdate(ctx, proof.DisbursementID)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrDisbursementNotFound
+		}
+		if err != nil {
+			return err
+		}
+		now := time.Now().UTC()
+		proof.ReviewedBy = &adminID
+		proof.ReviewedAt = &now
+		if decision != "approve" {
+			proof.Status = decision
+			if err := repo.UpdateFundUsageProof(ctx, proof); err != nil {
+				return err
+			}
+			return audit(ctx, repo, &adminID, "fund_usage_proof.reviewed", "fund_usage_proof", proof.ID, map[string]any{"status": "pending"}, map[string]any{"status": proof.Status})
+		}
+		proof.Status = "approved"
+		if err := repo.UpdateFundUsageProof(ctx, proof); err != nil {
+			return err
+		}
+		if err := audit(ctx, repo, &adminID, "fund_usage_proof.reviewed", "fund_usage_proof", proof.ID, map[string]any{"status": "pending"}, map[string]any{"status": proof.Status}); err != nil {
+			return err
+		}
+		d.Status = "verified"
+		if err := repo.UpdateDisbursement(ctx, d); err != nil {
+			return err
+		}
+		milestone, err := repo.GetMilestone(ctx, d.MilestoneID, d.CampaignID)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrMilestoneNotFound
+		}
+		if err != nil {
+			return err
+		}
+		milestone.Status = "verified"
+		if err := repo.UpdateMilestone(ctx, milestone); err != nil {
+			return err
+		}
+		c, err := repo.GetCampaignByID(ctx, d.CampaignID)
+		if err != nil {
+			return err
+		}
+		return s.releaseNextMilestone(ctx, repo, c)
+	})
+}
+func (s *CampaignService) releaseNextMilestone(ctx context.Context, repo repository.Repository, c *model.LoanCampaign) error {
+	milestones, err := repo.ListMilestones(ctx, c.ID)
+	if err != nil {
+		return err
+	}
+	available := false
+	for _, milestone := range milestones {
+		if milestone.Status == "available" {
+			available = true
+			break
+		}
+	}
+	if !available {
+		for i := range milestones {
+			if milestones[i].Status == "locked" {
+				milestones[i].Status = "available"
+				if err := repo.UpdateMilestone(ctx, &milestones[i]); err != nil {
+					return err
+				}
+				break
+			}
+		}
+	}
+	// Re-read after unlocking so the repository is the source of truth.
+	milestones, err = repo.ListMilestones(ctx, c.ID)
+	if err != nil {
+		return err
+	}
+	for _, milestone := range milestones {
+		if milestone.Status == "available" {
+			now := time.Now().UTC()
+			d := &model.Disbursement{CampaignID: c.ID, MilestoneID: milestone.ID, Amount: milestone.Amount, Method: "bank_transfer", RecipientType: "borrower", Status: "proof_required", ReleasedAt: &now}
+			if err := repo.CreateDisbursement(ctx, d); err != nil {
+				return err
+			}
+			milestone.Status = "disbursed"
+			return repo.UpdateMilestone(ctx, &milestone)
+		}
+	}
+	return nil
+}
 func (s *CampaignService) business(ctx context.Context, userID uuid.UUID) (*model.Business, error) {
 	b, err := s.repo.GetBusinessByUserID(ctx, userID)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -412,4 +682,29 @@ func defaultRisk(v string) string {
 		return "medium"
 	}
 	return strings.ToLower(strings.TrimSpace(v))
+}
+func validFundUsageProof(in FundUsageProofInput) bool {
+	if strings.TrimSpace(in.FileURL) == "" || in.Amount <= 0 {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(in.ProofType)) {
+	case "invoice", "receipt", "photo", "merchant_confirmation":
+		return true
+	default:
+		return false
+	}
+}
+func audit(ctx context.Context, repo repository.Repository, userID *uuid.UUID, action, entityType string, entityID uuid.UUID, oldValue, newValue any) error {
+	encode := func(value any) *string {
+		if value == nil {
+			return nil
+		}
+		data, err := json.Marshal(value)
+		if err != nil {
+			return nil
+		}
+		encoded := string(data)
+		return &encoded
+	}
+	return repo.CreateAuditLog(ctx, &model.AuditLog{UserID: userID, Action: action, EntityType: entityType, EntityID: entityID, OldValue: encode(oldValue), NewValue: encode(newValue)})
 }
