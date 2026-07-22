@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type CatalogFilter struct {
@@ -16,9 +17,12 @@ type CatalogFilter struct {
 }
 
 type Repository interface {
+	WithTransaction(context.Context, func(Repository) error) error
 	GetBusinessByUserID(context.Context, uuid.UUID) (*model.Business, error)
+	GetBusinessByID(context.Context, uuid.UUID) (*model.Business, error)
 	CreateCampaign(context.Context, *model.LoanCampaign) error
 	GetCampaignByID(context.Context, uuid.UUID) (*model.LoanCampaign, error)
+	GetCampaignByIDForUpdate(context.Context, uuid.UUID) (*model.LoanCampaign, error)
 	GetCampaignForBusiness(context.Context, uuid.UUID, uuid.UUID) (*model.LoanCampaign, error)
 	UpdateCampaign(context.Context, *model.LoanCampaign) error
 	DeleteCampaign(context.Context, uuid.UUID) error
@@ -35,15 +39,41 @@ type Repository interface {
 	DeleteMilestone(context.Context, uuid.UUID, uuid.UUID) error
 	ListMilestones(context.Context, uuid.UUID) ([]model.CampaignMilestone, error)
 	ReplaceMilestones(context.Context, uuid.UUID, []model.CampaignMilestone) error
+	CreateFunding(context.Context, *model.Funding) error
+	CreateDisbursement(context.Context, *model.Disbursement) error
+	GetDisbursement(context.Context, uuid.UUID) (*model.Disbursement, error)
+	GetDisbursementForUpdate(context.Context, uuid.UUID) (*model.Disbursement, error)
+	UpdateDisbursement(context.Context, *model.Disbursement) error
+	CreateFundUsageProof(context.Context, *model.FundUsageProof) error
+	GetFundUsageProof(context.Context, uuid.UUID) (*model.FundUsageProof, error)
+	GetFundUsageProofForUpdate(context.Context, uuid.UUID) (*model.FundUsageProof, error)
+	GetActiveFundUsageProof(context.Context, uuid.UUID) (*model.FundUsageProof, error)
+	DeleteFundUsageProof(context.Context, uuid.UUID) error
+	UpdateFundUsageProof(context.Context, *model.FundUsageProof) error
+	CreateAuditLog(context.Context, *model.AuditLog) error
+	HasPaidFunding(context.Context, uuid.UUID, uuid.UUID) (bool, error)
+	ListFundingsForLender(context.Context, uuid.UUID) ([]model.Funding, error)
+	ListDisbursements(context.Context, uuid.UUID) ([]model.Disbursement, error)
+	ListFundUsageProofs(context.Context, string, int, int) ([]model.FundUsageProof, error)
 	ListCatalog(context.Context, CatalogFilter) ([]model.LoanCampaign, error)
 }
 
 type CampaignRepository struct{ db *gorm.DB }
 
 func NewCampaignRepository(db *gorm.DB) *CampaignRepository { return &CampaignRepository{db: db} }
+func (r *CampaignRepository) WithTransaction(ctx context.Context, fn func(Repository) error) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return fn(&CampaignRepository{db: tx})
+	})
+}
 func (r *CampaignRepository) GetBusinessByUserID(ctx context.Context, userID uuid.UUID) (*model.Business, error) {
 	var b model.Business
 	err := r.db.WithContext(ctx).Where("user_id = ? AND status = ?", userID, "active").First(&b).Error
+	return &b, err
+}
+func (r *CampaignRepository) GetBusinessByID(ctx context.Context, id uuid.UUID) (*model.Business, error) {
+	var b model.Business
+	err := r.db.WithContext(ctx).First(&b, "id = ?", id).Error
 	return &b, err
 }
 func (r *CampaignRepository) CreateCampaign(ctx context.Context, c *model.LoanCampaign) error {
@@ -52,6 +82,11 @@ func (r *CampaignRepository) CreateCampaign(ctx context.Context, c *model.LoanCa
 func (r *CampaignRepository) GetCampaignByID(ctx context.Context, id uuid.UUID) (*model.LoanCampaign, error) {
 	var c model.LoanCampaign
 	err := r.db.WithContext(ctx).Preload("Business").Preload("Business.Category").Preload("BudgetItems").Preload("Milestones", func(db *gorm.DB) *gorm.DB { return db.Order("sequence_no ASC") }).First(&c, "id = ?", id).Error
+	return &c, err
+}
+func (r *CampaignRepository) GetCampaignByIDForUpdate(ctx context.Context, id uuid.UUID) (*model.LoanCampaign, error) {
+	var c model.LoanCampaign
+	err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).First(&c, "id = ?", id).Error
 	return &c, err
 }
 func (r *CampaignRepository) GetCampaignForBusiness(ctx context.Context, id, businessID uuid.UUID) (*model.LoanCampaign, error) {
@@ -123,6 +158,76 @@ func (r *CampaignRepository) ReplaceMilestones(ctx context.Context, campaignID u
 		}
 		return tx.Create(&milestones).Error
 	})
+}
+func (r *CampaignRepository) CreateFunding(ctx context.Context, funding *model.Funding) error {
+	return r.db.WithContext(ctx).Create(funding).Error
+}
+func (r *CampaignRepository) CreateDisbursement(ctx context.Context, disbursement *model.Disbursement) error {
+	return r.db.WithContext(ctx).Create(disbursement).Error
+}
+func (r *CampaignRepository) GetDisbursement(ctx context.Context, id uuid.UUID) (*model.Disbursement, error) {
+	var disbursement model.Disbursement
+	err := r.db.WithContext(ctx).First(&disbursement, "id = ?", id).Error
+	return &disbursement, err
+}
+func (r *CampaignRepository) GetDisbursementForUpdate(ctx context.Context, id uuid.UUID) (*model.Disbursement, error) {
+	var disbursement model.Disbursement
+	err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).First(&disbursement, "id = ?", id).Error
+	return &disbursement, err
+}
+func (r *CampaignRepository) UpdateDisbursement(ctx context.Context, disbursement *model.Disbursement) error {
+	return r.db.WithContext(ctx).Save(disbursement).Error
+}
+func (r *CampaignRepository) CreateFundUsageProof(ctx context.Context, proof *model.FundUsageProof) error {
+	return r.db.WithContext(ctx).Create(proof).Error
+}
+func (r *CampaignRepository) GetFundUsageProof(ctx context.Context, id uuid.UUID) (*model.FundUsageProof, error) {
+	var proof model.FundUsageProof
+	err := r.db.WithContext(ctx).First(&proof, "id = ?", id).Error
+	return &proof, err
+}
+func (r *CampaignRepository) GetFundUsageProofForUpdate(ctx context.Context, id uuid.UUID) (*model.FundUsageProof, error) {
+	var proof model.FundUsageProof
+	err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).First(&proof, "id = ?", id).Error
+	return &proof, err
+}
+func (r *CampaignRepository) GetActiveFundUsageProof(ctx context.Context, disbursementID uuid.UUID) (*model.FundUsageProof, error) {
+	var proof model.FundUsageProof
+	err := r.db.WithContext(ctx).Where("disbursement_id = ?", disbursementID).First(&proof).Error
+	return &proof, err
+}
+func (r *CampaignRepository) DeleteFundUsageProof(ctx context.Context, id uuid.UUID) error {
+	return r.db.WithContext(ctx).Delete(&model.FundUsageProof{}, "id = ?", id).Error
+}
+func (r *CampaignRepository) UpdateFundUsageProof(ctx context.Context, proof *model.FundUsageProof) error {
+	return r.db.WithContext(ctx).Save(proof).Error
+}
+func (r *CampaignRepository) CreateAuditLog(ctx context.Context, audit *model.AuditLog) error {
+	return r.db.WithContext(ctx).Create(audit).Error
+}
+func (r *CampaignRepository) HasPaidFunding(ctx context.Context, campaignID, userID uuid.UUID) (bool, error) {
+	var n int64
+	err := r.db.WithContext(ctx).Model(&model.Funding{}).Where("campaign_id = ? AND lender_user_id = ? AND status = ?", campaignID, userID, "paid").Count(&n).Error
+	return n > 0, err
+}
+func (r *CampaignRepository) ListFundingsForLender(ctx context.Context, userID uuid.UUID) ([]model.Funding, error) {
+	var rows []model.Funding
+	err := r.db.WithContext(ctx).Where("lender_user_id = ?", userID).Order("funded_at DESC").Find(&rows).Error
+	return rows, err
+}
+func (r *CampaignRepository) ListDisbursements(ctx context.Context, campaignID uuid.UUID) ([]model.Disbursement, error) {
+	var rows []model.Disbursement
+	err := r.db.WithContext(ctx).Where("campaign_id = ?", campaignID).Order("created_at ASC").Find(&rows).Error
+	return rows, err
+}
+func (r *CampaignRepository) ListFundUsageProofs(ctx context.Context, status string, limit, offset int) ([]model.FundUsageProof, error) {
+	var rows []model.FundUsageProof
+	q := r.db.WithContext(ctx).Order("created_at ASC").Limit(limit).Offset(offset)
+	if status != "" {
+		q = q.Where("status = ?", status)
+	}
+	err := q.Find(&rows).Error
+	return rows, err
 }
 func (r *CampaignRepository) ListCatalog(ctx context.Context, f CatalogFilter) ([]model.LoanCampaign, error) {
 	var cs []model.LoanCampaign

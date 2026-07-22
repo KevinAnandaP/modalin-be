@@ -3,7 +3,6 @@ package main
 import (
 	"log"
 
-	campaignJob "modalin-be/internal/campaign/job"
 	"modalin-be/internal/router"
 	"modalin-be/pkg/config"
 	"modalin-be/pkg/database"
@@ -23,7 +22,6 @@ func main() {
 
 	// 2. Connect Database
 	database.ConnectDB()
-	campaignJob.StartMilestoneUnlockScheduler(database.DB)
 
 	// 3. Initialize Fiber Application
 	app := fiber.New(fiber.Config{
@@ -34,6 +32,8 @@ func main() {
 	app.Use(logger.New())  // Request logging
 	app.Use(recover.New()) // Panic recovery
 	app.Use(cors.New())    // CORS configuration (crucial for Vue frontend)
+	app.Get("/uploads/fund-usage-proofs/*", func(c *fiber.Ctx) error { return c.SendStatus(fiber.StatusForbidden) })
+	app.Get("/uploads/financial-proofs/*", func(c *fiber.Ctx) error { return c.SendStatus(fiber.StatusForbidden) })
 	app.Static("/uploads", config.AppConfig.UploadDir)
 
 	// 5. Setup Routes

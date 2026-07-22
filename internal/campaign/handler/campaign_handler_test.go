@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"errors"
+	"mime/multipart"
 	"net/http/httptest"
 	"testing"
 
@@ -10,7 +12,44 @@ import (
 	"modalin-be/internal/model"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 )
+
+type proofAccessRepo struct {
+	repository.Repository
+	business *model.Business
+	campaign *model.LoanCampaign
+	proof    *model.FundUsageProof
+	funded   bool
+}
+
+func (r *proofAccessRepo) GetBusinessByUserID(_ context.Context, id uuid.UUID) (*model.Business, error) {
+	if r.business.UserID == id {
+		return r.business, nil
+	}
+	return nil, errors.New("not found")
+}
+func (r *proofAccessRepo) GetCampaignForBusiness(_ context.Context, id, businessID uuid.UUID) (*model.LoanCampaign, error) {
+	if id == r.campaign.ID && businessID == r.business.ID {
+		return r.campaign, nil
+	}
+	return nil, errors.New("not found")
+}
+func (r *proofAccessRepo) GetFundUsageProof(_ context.Context, id uuid.UUID) (*model.FundUsageProof, error) {
+	if id == r.proof.ID {
+		return r.proof, nil
+	}
+	return nil, errors.New("not found")
+}
+func (r *proofAccessRepo) HasPaidFunding(_ context.Context, _, _ uuid.UUID) (bool, error) {
+	return r.funded, nil
+}
+
+type memoryProofStorage struct{}
+
+func (memoryProofStorage) Store(*multipart.FileHeader) (string, error) { return "", nil }
+func (memoryProofStorage) Delete(string) error                         { return nil }
+func (memoryProofStorage) Read(string) ([]byte, error)                 { return []byte("proof"), nil }
 
 type catalogRepo struct {
 	repository.Repository
@@ -36,5 +75,37 @@ func TestCatalogIsPublicAndPassesSearchFilters(t *testing.T) {
 	}
 	if repo.received.Query != "warung" || repo.received.Category != "kuliner" || repo.received.RiskLevel != "low" || repo.received.MinAmount != 100000 || repo.received.MaxAmount != 500000 {
 		t.Fatalf("unexpected catalog filter: %#v", repo.received)
+	}
+}
+
+func TestProofDownloadEnforcesCampaignAccess(t *testing.T) {
+	owner := uuid.New()
+	business := &model.Business{ID: uuid.New(), UserID: owner}
+	campaign := &model.LoanCampaign{ID: uuid.New(), BusinessID: business.ID}
+	proof := &model.FundUsageProof{ID: uuid.New(), CampaignID: campaign.ID, FileURL: "/uploads/fund-usage-proofs/a.png"}
+	repo := &proofAccessRepo{business: business, campaign: campaign, proof: proof}
+	call := func(user uuid.UUID, roles []string) int {
+		app := fiber.New()
+		app.Use(func(c *fiber.Ctx) error { c.Locals("user_id", user); c.Locals("roles", roles); return c.Next() })
+		app.Get("/campaigns/:id/fund-usage-proofs/:proofID/download", NewCampaignHandler(service.NewCampaignService(repo), memoryProofStorage{}).DownloadFundUsageProof)
+		req := httptest.NewRequest("GET", "/campaigns/"+campaign.ID.String()+"/fund-usage-proofs/"+proof.ID.String()+"/download", nil)
+		res, err := app.Test(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res.StatusCode
+	}
+	if status := call(owner, []string{"borrower"}); status != fiber.StatusOK {
+		t.Fatalf("owner expected 200, got %d", status)
+	}
+	if status := call(uuid.New(), []string{"lender"}); status != fiber.StatusForbidden {
+		t.Fatalf("unfunded lender expected 403, got %d", status)
+	}
+	repo.funded = true
+	if status := call(uuid.New(), []string{"lender"}); status != fiber.StatusOK {
+		t.Fatalf("funded lender expected 200, got %d", status)
+	}
+	if status := call(uuid.New(), []string{"admin"}); status != fiber.StatusOK {
+		t.Fatalf("admin expected 200, got %d", status)
 	}
 }

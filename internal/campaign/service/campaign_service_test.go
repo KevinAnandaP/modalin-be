@@ -14,14 +14,28 @@ import (
 )
 
 type fakeCampaignRepo struct {
-	business   *model.Business
-	campaigns  map[uuid.UUID]*model.LoanCampaign
-	budgets    map[uuid.UUID][]model.CampaignBudgetItem
-	milestones map[uuid.UUID][]model.CampaignMilestone
+	business          *model.Business
+	campaigns         map[uuid.UUID]*model.LoanCampaign
+	budgets           map[uuid.UUID][]model.CampaignBudgetItem
+	milestones        map[uuid.UUID][]model.CampaignMilestone
+	disbursements     map[uuid.UUID][]model.Disbursement
+	proofs            map[uuid.UUID]*model.FundUsageProof
+	audits            []model.AuditLog
+	transactions      int
+	lockedReads       int
+	proofLocks        int
+	disbursementLocks int
+	hasFunding        bool
 }
 
 func (r *fakeCampaignRepo) GetBusinessByUserID(_ context.Context, userID uuid.UUID) (*model.Business, error) {
 	if r.business != nil && r.business.UserID == userID {
+		return r.business, nil
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+func (r *fakeCampaignRepo) GetBusinessByID(_ context.Context, id uuid.UUID) (*model.Business, error) {
+	if r.business != nil && r.business.ID == id {
 		return r.business, nil
 	}
 	return nil, gorm.ErrRecordNotFound
@@ -36,6 +50,34 @@ func (r *fakeCampaignRepo) GetCampaignByID(_ context.Context, id uuid.UUID) (*mo
 		return c, nil
 	}
 	return nil, gorm.ErrRecordNotFound
+}
+func (r *fakeCampaignRepo) GetCampaignByIDForUpdate(ctx context.Context, id uuid.UUID) (*model.LoanCampaign, error) {
+	r.lockedReads++
+	return r.GetCampaignByID(ctx, id)
+}
+func (r *fakeCampaignRepo) GetFundUsageProofForUpdate(ctx context.Context, id uuid.UUID) (*model.FundUsageProof, error) {
+	r.proofLocks++
+	return r.GetFundUsageProof(ctx, id)
+}
+func (r *fakeCampaignRepo) GetActiveFundUsageProof(_ context.Context, disbursementID uuid.UUID) (*model.FundUsageProof, error) {
+	for _, proof := range r.proofs {
+		if proof.DisbursementID == disbursementID {
+			return proof, nil
+		}
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+func (r *fakeCampaignRepo) DeleteFundUsageProof(_ context.Context, id uuid.UUID) error {
+	delete(r.proofs, id)
+	return nil
+}
+func (r *fakeCampaignRepo) GetDisbursementForUpdate(ctx context.Context, id uuid.UUID) (*model.Disbursement, error) {
+	r.disbursementLocks++
+	return r.GetDisbursement(ctx, id)
+}
+func (r *fakeCampaignRepo) WithTransaction(_ context.Context, fn func(repository.Repository) error) error {
+	r.transactions++
+	return fn(r)
 }
 func (r *fakeCampaignRepo) GetCampaignForBusiness(_ context.Context, id, businessID uuid.UUID) (*model.LoanCampaign, error) {
 	c, err := r.GetCampaignByID(context.Background(), id)
@@ -139,12 +181,70 @@ func (r *fakeCampaignRepo) ReplaceMilestones(_ context.Context, campaignID uuid.
 	r.milestones[campaignID] = milestones
 	return nil
 }
+func (r *fakeCampaignRepo) CreateFunding(_ context.Context, _ *model.Funding) error { return nil }
+func (r *fakeCampaignRepo) CreateDisbursement(_ context.Context, d *model.Disbursement) error {
+	d.ID = uuid.New()
+	r.disbursements[d.CampaignID] = append(r.disbursements[d.CampaignID], *d)
+	return nil
+}
+func (r *fakeCampaignRepo) GetDisbursement(_ context.Context, id uuid.UUID) (*model.Disbursement, error) {
+	for campaignID := range r.disbursements {
+		for i := range r.disbursements[campaignID] {
+			if r.disbursements[campaignID][i].ID == id {
+				return &r.disbursements[campaignID][i], nil
+			}
+		}
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+func (r *fakeCampaignRepo) UpdateDisbursement(_ context.Context, d *model.Disbursement) error {
+	for campaignID := range r.disbursements {
+		for i := range r.disbursements[campaignID] {
+			if r.disbursements[campaignID][i].ID == d.ID {
+				r.disbursements[campaignID][i] = *d
+				return nil
+			}
+		}
+	}
+	return gorm.ErrRecordNotFound
+}
+func (r *fakeCampaignRepo) CreateFundUsageProof(_ context.Context, proof *model.FundUsageProof) error {
+	proof.ID = uuid.New()
+	r.proofs[proof.ID] = proof
+	return nil
+}
+func (r *fakeCampaignRepo) GetFundUsageProof(_ context.Context, id uuid.UUID) (*model.FundUsageProof, error) {
+	if proof := r.proofs[id]; proof != nil {
+		return proof, nil
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+func (r *fakeCampaignRepo) UpdateFundUsageProof(_ context.Context, proof *model.FundUsageProof) error {
+	r.proofs[proof.ID] = proof
+	return nil
+}
+func (r *fakeCampaignRepo) CreateAuditLog(_ context.Context, audit *model.AuditLog) error {
+	r.audits = append(r.audits, *audit)
+	return nil
+}
+func (r *fakeCampaignRepo) HasPaidFunding(_ context.Context, _, _ uuid.UUID) (bool, error) {
+	return r.hasFunding, nil
+}
+func (r *fakeCampaignRepo) ListFundingsForLender(_ context.Context, _ uuid.UUID) ([]model.Funding, error) {
+	return nil, nil
+}
+func (r *fakeCampaignRepo) ListDisbursements(_ context.Context, campaignID uuid.UUID) ([]model.Disbursement, error) {
+	return r.disbursements[campaignID], nil
+}
+func (r *fakeCampaignRepo) ListFundUsageProofs(_ context.Context, _ string, _, _ int) ([]model.FundUsageProof, error) {
+	return nil, nil
+}
 func (r *fakeCampaignRepo) ListCatalog(_ context.Context, _ repository.CatalogFilter) ([]model.LoanCampaign, error) {
 	return nil, nil
 }
 
 func newRepo(userID uuid.UUID, limit int64) *fakeCampaignRepo {
-	return &fakeCampaignRepo{business: &model.Business{ID: uuid.New(), UserID: userID, CurrentBorrowingLimit: limit, Status: "active"}, campaigns: map[uuid.UUID]*model.LoanCampaign{}, budgets: map[uuid.UUID][]model.CampaignBudgetItem{}, milestones: map[uuid.UUID][]model.CampaignMilestone{}}
+	return &fakeCampaignRepo{business: &model.Business{ID: uuid.New(), UserID: userID, CurrentBorrowingLimit: limit, Status: "active"}, campaigns: map[uuid.UUID]*model.LoanCampaign{}, budgets: map[uuid.UUID][]model.CampaignBudgetItem{}, milestones: map[uuid.UUID][]model.CampaignMilestone{}, disbursements: map[uuid.UUID][]model.Disbursement{}, proofs: map[uuid.UUID]*model.FundUsageProof{}}
 }
 
 func TestCampaignSubmissionRequiresLimitAndCompletePlan(t *testing.T) {
@@ -259,5 +359,127 @@ func TestCreateBudgetItemRejectsInvalidPriorityLevel(t *testing.T) {
 	_, err := svc.CreateBudgetItem(context.Background(), userID, campaign.ID, service.BudgetItemInput{ItemName: "Stok", Category: "stock", Amount: 1_000_000, PurchaseMethod: "direct_purchase", PriorityLevel: "urgent"})
 	if !errors.Is(err, service.ErrInvalidBudgetItem) {
 		t.Fatalf("expected invalid priority level error, got %v", err)
+	}
+}
+
+func TestPledgeRejectsSelfFundingAndOverfunding(t *testing.T) {
+	ownerID := uuid.New()
+	repo := newRepo(ownerID, 1_000_000)
+	campaign := &model.LoanCampaign{ID: uuid.New(), BusinessID: repo.business.ID, RequestedAmount: 100_000, Status: "published"}
+	repo.campaigns[campaign.ID] = campaign
+	svc := service.NewCampaignService(repo)
+
+	if _, err := svc.Pledge(context.Background(), ownerID, campaign.ID, 50_000); !errors.Is(err, service.ErrSelfFunding) {
+		t.Fatalf("expected self-funding rejection, got %v", err)
+	}
+	if _, err := svc.Pledge(context.Background(), uuid.New(), campaign.ID, 100_001); !errors.Is(err, service.ErrFundingExceedsTarget) {
+		t.Fatalf("expected overfunding rejection, got %v", err)
+	}
+}
+
+func TestFullPledgeCreatesFirstDisbursement(t *testing.T) {
+	ownerID := uuid.New()
+	repo := newRepo(ownerID, 1_000_000)
+	campaign := &model.LoanCampaign{ID: uuid.New(), BusinessID: repo.business.ID, RequestedAmount: 100_000, Status: "published"}
+	repo.campaigns[campaign.ID] = campaign
+	repo.milestones[campaign.ID] = []model.CampaignMilestone{{ID: uuid.New(), CampaignID: campaign.ID, Amount: 100_000, SequenceNo: 1, Status: "available"}}
+	svc := service.NewCampaignService(repo)
+
+	if _, err := svc.Pledge(context.Background(), uuid.New(), campaign.ID, 100_000); err != nil {
+		t.Fatal(err)
+	}
+	if campaign.Status != "active" || campaign.FundedAmount != 100_000 {
+		t.Fatalf("expected active fully funded campaign, got %#v", campaign)
+	}
+	if len(repo.disbursements[campaign.ID]) != 1 || repo.disbursements[campaign.ID][0].Status != "proof_required" {
+		t.Fatalf("expected first proof-required disbursement, got %#v", repo.disbursements[campaign.ID])
+	}
+}
+
+func TestPledgeUsesTransactionAndLocksCampaignBeforeFunding(t *testing.T) {
+	ownerID := uuid.New()
+	repo := newRepo(ownerID, 1_000_000)
+	campaign := &model.LoanCampaign{ID: uuid.New(), BusinessID: repo.business.ID, RequestedAmount: 100_000, Status: "published"}
+	repo.campaigns[campaign.ID] = campaign
+	repo.milestones[campaign.ID] = []model.CampaignMilestone{{ID: uuid.New(), CampaignID: campaign.ID, Amount: 100_000, SequenceNo: 1, Status: "available"}}
+	svc := service.NewCampaignService(repo)
+
+	if _, err := svc.Pledge(context.Background(), uuid.New(), campaign.ID, 100_000); err != nil {
+		t.Fatal(err)
+	}
+	if repo.transactions != 1 {
+		t.Fatalf("expected pledge to run in one transaction, got %d", repo.transactions)
+	}
+	if repo.lockedReads != 1 {
+		t.Fatalf("expected pledge to lock the campaign before funding, got %d locked reads", repo.lockedReads)
+	}
+}
+
+func TestApprovedProofVerifiesMilestoneAndCreatesNextDisbursement(t *testing.T) {
+	ownerID := uuid.New()
+	repo := newRepo(ownerID, 1_000_000)
+	campaign := &model.LoanCampaign{ID: uuid.New(), BusinessID: repo.business.ID, RequestedAmount: 200_000, FundedAmount: 200_000, Status: "active"}
+	repo.campaigns[campaign.ID] = campaign
+	first := model.CampaignMilestone{ID: uuid.New(), CampaignID: campaign.ID, Amount: 100_000, SequenceNo: 1, Status: "disbursed"}
+	second := model.CampaignMilestone{ID: uuid.New(), CampaignID: campaign.ID, Amount: 100_000, SequenceNo: 2, Status: "locked"}
+	repo.milestones[campaign.ID] = []model.CampaignMilestone{first, second}
+	disbursement := model.Disbursement{ID: uuid.New(), CampaignID: campaign.ID, MilestoneID: first.ID, Amount: 100_000, Status: "proof_required"}
+	repo.disbursements[campaign.ID] = []model.Disbursement{disbursement}
+	proof := model.FundUsageProof{ID: uuid.New(), CampaignID: campaign.ID, DisbursementID: disbursement.ID, Amount: 100_000, FileURL: "/uploads/proof.png", ProofType: "receipt", Status: "pending"}
+	repo.proofs[proof.ID] = &proof
+	svc := service.NewCampaignService(repo)
+
+	if err := svc.ReviewFundUsageProof(context.Background(), uuid.New(), proof.ID, "approve"); err != nil {
+		t.Fatal(err)
+	}
+	if repo.milestones[campaign.ID][0].Status != "verified" || repo.milestones[campaign.ID][1].Status != "disbursed" {
+		t.Fatalf("expected verified first and disbursed second milestone, got %#v", repo.milestones[campaign.ID])
+	}
+	if len(repo.disbursements[campaign.ID]) != 2 {
+		t.Fatalf("expected second disbursement, got %#v", repo.disbursements[campaign.ID])
+	}
+}
+
+func TestFundUsageProofMustMatchDisbursementAndReviewUsesTransaction(t *testing.T) {
+	ownerID := uuid.New()
+	repo := newRepo(ownerID, 1_000_000)
+	campaign := &model.LoanCampaign{ID: uuid.New(), BusinessID: repo.business.ID, Status: "active"}
+	repo.campaigns[campaign.ID] = campaign
+	milestone := model.CampaignMilestone{ID: uuid.New(), CampaignID: campaign.ID, Amount: 100_000, Status: "disbursed"}
+	repo.milestones[campaign.ID] = []model.CampaignMilestone{milestone}
+	disbursement := model.Disbursement{ID: uuid.New(), CampaignID: campaign.ID, MilestoneID: milestone.ID, Amount: 100_000, Status: "proof_required"}
+	repo.disbursements[campaign.ID] = []model.Disbursement{disbursement}
+	svc := service.NewCampaignService(repo)
+
+	if _, err := svc.SubmitFundUsageProof(context.Background(), ownerID, campaign.ID, disbursement.ID, service.FundUsageProofInput{FileURL: "/uploads/proof.png", ProofType: "receipt", Amount: 99_999}); !errors.Is(err, service.ErrInvalidFundUsageProof) {
+		t.Fatalf("expected mismatched proof amount rejection, got %v", err)
+	}
+	proof := &model.FundUsageProof{ID: uuid.New(), CampaignID: campaign.ID, DisbursementID: disbursement.ID, Amount: 100_000, FileURL: "/uploads/proof.png", ProofType: "receipt", Status: "pending"}
+	repo.proofs[proof.ID] = proof
+	if err := svc.ReviewFundUsageProof(context.Background(), uuid.New(), proof.ID, "approve"); err != nil {
+		t.Fatal(err)
+	}
+	if repo.transactions != 1 || repo.proofLocks != 1 || repo.disbursementLocks != 1 {
+		t.Fatalf("review must transactionally lock proof and disbursement: tx=%d proof=%d disbursement=%d", repo.transactions, repo.proofLocks, repo.disbursementLocks)
+	}
+}
+
+func TestProofFileAccessAllowsOwnerAdminAndFundingLender(t *testing.T) {
+	ownerID := uuid.New()
+	repo := newRepo(ownerID, 1_000_000)
+	campaign := &model.LoanCampaign{ID: uuid.New(), BusinessID: repo.business.ID}
+	repo.campaigns[campaign.ID] = campaign
+	proof := &model.FundUsageProof{ID: uuid.New(), CampaignID: campaign.ID, FileURL: "/uploads/fund-usage-proofs/proof.png"}
+	repo.proofs[proof.ID] = proof
+	svc := service.NewCampaignService(repo)
+	if _, err := svc.ProofFileURL(context.Background(), ownerID, campaign.ID, proof.ID, []string{"borrower"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ProofFileURL(context.Background(), uuid.New(), campaign.ID, proof.ID, []string{"lender"}); !errors.Is(err, service.ErrProofAccessDenied) {
+		t.Fatalf("expected lender denial, got %v", err)
+	}
+	repo.hasFunding = true
+	if _, err := svc.ProofFileURL(context.Background(), uuid.New(), campaign.ID, proof.ID, []string{"lender"}); err != nil {
+		t.Fatal(err)
 	}
 }

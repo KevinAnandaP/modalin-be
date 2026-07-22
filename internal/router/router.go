@@ -11,6 +11,7 @@ import (
 	campaignHandler "modalin-be/internal/campaign/handler"
 	campaignRepository "modalin-be/internal/campaign/repository"
 	campaignService "modalin-be/internal/campaign/service"
+	campaignStorage "modalin-be/internal/campaign/storage"
 	healthHandler "modalin-be/internal/health/handler"
 	"modalin-be/pkg/config"
 	"modalin-be/pkg/database"
@@ -32,7 +33,7 @@ func SetupRoutes(app *fiber.App) {
 	health := healthHandler.NewHealthHandler()
 	auth := authHandler.NewAuthHandler(authService.NewAuthService(authRepository.NewAuthRepository(database.DB), config.AppConfig.JWTSecret))
 	business := businessHandler.NewBusinessHandler(businessService.NewBusinessService(businessRepository.NewBusinessRepository(database.DB)), businessStorage.NewLocalProofStorage(config.AppConfig.UploadDir, "/uploads"))
-	campaign := campaignHandler.NewCampaignHandler(campaignService.NewCampaignService(campaignRepository.NewCampaignRepository(database.DB)))
+	campaign := campaignHandler.NewCampaignHandler(campaignService.NewCampaignService(campaignRepository.NewCampaignRepository(database.DB)), campaignStorage.NewLocalProofStorage(config.AppConfig.UploadDir, "/uploads"))
 
 	// Register Routes
 	app.Get("/health", health.CheckHealth)
@@ -77,10 +78,16 @@ func SetupRoutes(app *fiber.App) {
 	finRoutes.Get("/:id", business.GetFinancialRecord)
 	finRoutes.Put("/:id", business.UpdateFinancialRecord)
 	finRoutes.Post("/:id/proofs", business.UploadFinancialRecordProof)
+	finRoutes.Get("/proofs/:proofID/download", business.DownloadFinancialRecordProof)
 	finRoutes.Delete("/:id", business.DeleteFinancialRecord)
 
 	// Loan campaign management (borrower) and public catalogue.
 	v1.Get("/campaigns", campaign.Catalog)
+	lenderCampaignRoutes := v1.Group("/campaigns", middleware.JWTProtected(config.AppConfig.JWTSecret), middleware.RequireRole("lender"))
+	lenderCampaignRoutes.Post("/:id/fundings", campaign.Pledge)
+	lenderCampaignRoutes.Get("/fundings/me", campaign.ListLenderFundings)
+	protectedCampaignRoutes := v1.Group("/campaigns", middleware.JWTProtected(config.AppConfig.JWTSecret))
+	protectedCampaignRoutes.Get("/:id/fund-usage-proofs/:proofID/download", campaign.DownloadFundUsageProof)
 	campaignRoutes := v1.Group("/campaigns", middleware.JWTProtected(config.AppConfig.JWTSecret), middleware.RequireRole("borrower"))
 	campaignRoutes.Post("/", campaign.Create)
 	campaignRoutes.Get("/me", campaign.ListMine)
@@ -93,5 +100,9 @@ func SetupRoutes(app *fiber.App) {
 	campaignRoutes.Put("/:id/budget-items/:budgetID", campaign.UpdateBudget)
 	campaignRoutes.Delete("/:id/budget-items/:budgetID", campaign.DeleteBudget)
 	campaignRoutes.Get("/:id/milestones", campaign.ListMilestones)
+	campaignRoutes.Post("/:id/disbursements/:disbursementID/proofs", campaign.UploadFundUsageProof)
+	campaignRoutes.Get("/:id/disbursements", campaign.ListDisbursements)
 	adminRoutes.Post("/campaigns/:id/review", campaign.Review)
+	adminRoutes.Post("/fund-usage-proofs/:proofID/review", campaign.ReviewFundUsageProof)
+	adminRoutes.Get("/fund-usage-proofs", campaign.ListFundUsageProofs)
 }
