@@ -55,6 +55,31 @@ type Repository interface {
 	ListFundingsForLender(context.Context, uuid.UUID) ([]model.Funding, error)
 	ListDisbursements(context.Context, uuid.UUID) ([]model.Disbursement, error)
 	ListFundUsageProofs(context.Context, string, int, int) ([]model.FundUsageProof, error)
+	CreateMonthlyProgressReport(context.Context, *model.MonthlyProgressReport) error
+	CreateMonthlyProgressReportProof(context.Context, *model.MonthlyProgressReportProof) error
+	ListMonthlyProgressReports(context.Context, uuid.UUID) ([]model.MonthlyProgressReport, error)
+	GetMonthlyProgressReportForUpdate(context.Context, uuid.UUID) (*model.MonthlyProgressReport, error)
+	UpdateMonthlyProgressReport(context.Context, *model.MonthlyProgressReport) error
+	CreateRevenueReport(context.Context, *model.RevenueReport) error
+	GetRevenueReport(context.Context, uuid.UUID) (*model.RevenueReport, error)
+	GetRevenueReportForUpdate(context.Context, uuid.UUID) (*model.RevenueReport, error)
+	ListRevenueReports(context.Context, uuid.UUID) ([]model.RevenueReport, error)
+	UpdateRevenueReport(context.Context, *model.RevenueReport) error
+	CreateRevenueReportProof(context.Context, *model.RevenueReportProof) error
+	ListRevenueReportProofs(context.Context, uuid.UUID) ([]model.RevenueReportProof, error)
+	CreateRepaymentSchedules(context.Context, []model.RepaymentSchedule) error
+	ListRepaymentSchedules(context.Context, uuid.UUID) ([]model.RepaymentSchedule, error)
+	GetRepaymentScheduleForUpdate(context.Context, uuid.UUID) (*model.RepaymentSchedule, error)
+	UpdateRepaymentSchedule(context.Context, *model.RepaymentSchedule) error
+	CreateRepayment(context.Context, *model.Repayment) error
+	HasActiveRepayment(context.Context, uuid.UUID) (bool, error)
+	GetRepaymentForUpdate(context.Context, uuid.UUID) (*model.Repayment, error)
+	UpdateRepayment(context.Context, *model.Repayment) error
+	ListPaidFundings(context.Context, uuid.UUID) ([]model.Funding, error)
+	CreateLenderReturnDistributions(context.Context, []model.LenderReturnDistribution) error
+	GetLenderReturnDistributionForUpdate(context.Context, uuid.UUID) (*model.LenderReturnDistribution, error)
+	UpdateLenderReturnDistribution(context.Context, *model.LenderReturnDistribution) error
+	ListLenderReturnDistributions(context.Context, uuid.UUID) ([]model.LenderReturnDistribution, error)
 	ListCatalog(context.Context, CatalogFilter) ([]model.LoanCampaign, error)
 }
 
@@ -228,6 +253,115 @@ func (r *CampaignRepository) ListFundUsageProofs(ctx context.Context, status str
 	}
 	err := q.Find(&rows).Error
 	return rows, err
+}
+func (r *CampaignRepository) CreateMonthlyProgressReport(ctx context.Context, report *model.MonthlyProgressReport) error {
+	return r.db.WithContext(ctx).Create(report).Error
+}
+func (r *CampaignRepository) CreateMonthlyProgressReportProof(ctx context.Context, proof *model.MonthlyProgressReportProof) error {
+	return r.db.WithContext(ctx).Create(proof).Error
+}
+func (r *CampaignRepository) ListMonthlyProgressReports(ctx context.Context, campaignID uuid.UUID) ([]model.MonthlyProgressReport, error) {
+	var reports []model.MonthlyProgressReport
+	err := r.db.WithContext(ctx).Preload("Proofs").Where("campaign_id = ?", campaignID).Order("period_year DESC, period_month DESC").Find(&reports).Error
+	return reports, err
+}
+func (r *CampaignRepository) GetMonthlyProgressReportForUpdate(ctx context.Context, id uuid.UUID) (*model.MonthlyProgressReport, error) {
+	var report model.MonthlyProgressReport
+	err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).First(&report, "id = ?", id).Error
+	return &report, err
+}
+func (r *CampaignRepository) UpdateMonthlyProgressReport(ctx context.Context, report *model.MonthlyProgressReport) error {
+	return r.db.WithContext(ctx).Save(report).Error
+}
+func (r *CampaignRepository) CreateRevenueReport(ctx context.Context, report *model.RevenueReport) error {
+	return r.db.WithContext(ctx).Create(report).Error
+}
+func (r *CampaignRepository) GetRevenueReport(ctx context.Context, id uuid.UUID) (*model.RevenueReport, error) {
+	var report model.RevenueReport
+	err := r.db.WithContext(ctx).Preload("Proofs").First(&report, "id = ?", id).Error
+	return &report, err
+}
+func (r *CampaignRepository) GetRevenueReportForUpdate(ctx context.Context, id uuid.UUID) (*model.RevenueReport, error) {
+	var report model.RevenueReport
+	err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).First(&report, "id = ?", id).Error
+	return &report, err
+}
+func (r *CampaignRepository) ListRevenueReports(ctx context.Context, campaignID uuid.UUID) ([]model.RevenueReport, error) {
+	var reports []model.RevenueReport
+	err := r.db.WithContext(ctx).Preload("Proofs").Where("campaign_id = ?", campaignID).Order("period_year DESC, period_month DESC").Find(&reports).Error
+	return reports, err
+}
+func (r *CampaignRepository) UpdateRevenueReport(ctx context.Context, report *model.RevenueReport) error {
+	return r.db.WithContext(ctx).Save(report).Error
+}
+func (r *CampaignRepository) CreateRevenueReportProof(ctx context.Context, proof *model.RevenueReportProof) error {
+	return r.db.WithContext(ctx).Create(proof).Error
+}
+func (r *CampaignRepository) ListRevenueReportProofs(ctx context.Context, reportID uuid.UUID) ([]model.RevenueReportProof, error) {
+	var proofs []model.RevenueReportProof
+	err := r.db.WithContext(ctx).Where("revenue_report_id = ?", reportID).Order("created_at ASC").Find(&proofs).Error
+	return proofs, err
+}
+func (r *CampaignRepository) CreateRepaymentSchedules(ctx context.Context, schedules []model.RepaymentSchedule) error {
+	if len(schedules) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Create(&schedules).Error
+}
+func (r *CampaignRepository) ListRepaymentSchedules(ctx context.Context, campaignID uuid.UUID) ([]model.RepaymentSchedule, error) {
+	var schedules []model.RepaymentSchedule
+	err := r.db.WithContext(ctx).Where("campaign_id = ?", campaignID).Order("due_date ASC, id ASC").Find(&schedules).Error
+	return schedules, err
+}
+func (r *CampaignRepository) GetRepaymentScheduleForUpdate(ctx context.Context, id uuid.UUID) (*model.RepaymentSchedule, error) {
+	var schedule model.RepaymentSchedule
+	err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).First(&schedule, "id = ?", id).Error
+	return &schedule, err
+}
+func (r *CampaignRepository) UpdateRepaymentSchedule(ctx context.Context, schedule *model.RepaymentSchedule) error {
+	return r.db.WithContext(ctx).Save(schedule).Error
+}
+func (r *CampaignRepository) CreateRepayment(ctx context.Context, repayment *model.Repayment) error {
+	return r.db.WithContext(ctx).Create(repayment).Error
+}
+func (r *CampaignRepository) HasActiveRepayment(ctx context.Context, scheduleID uuid.UUID) (bool, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&model.Repayment{}).
+		Where("schedule_id = ? AND status IN ?", scheduleID, []string{"pending", "verifier_checked", "verified"}).
+		Count(&count).Error
+	return count > 0, err
+}
+func (r *CampaignRepository) GetRepaymentForUpdate(ctx context.Context, id uuid.UUID) (*model.Repayment, error) {
+	var repayment model.Repayment
+	err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).First(&repayment, "id = ?", id).Error
+	return &repayment, err
+}
+func (r *CampaignRepository) UpdateRepayment(ctx context.Context, repayment *model.Repayment) error {
+	return r.db.WithContext(ctx).Save(repayment).Error
+}
+func (r *CampaignRepository) ListPaidFundings(ctx context.Context, campaignID uuid.UUID) ([]model.Funding, error) {
+	var fundings []model.Funding
+	err := r.db.WithContext(ctx).Where("campaign_id = ? AND status = ?", campaignID, "paid").Order("id ASC").Find(&fundings).Error
+	return fundings, err
+}
+func (r *CampaignRepository) CreateLenderReturnDistributions(ctx context.Context, distributions []model.LenderReturnDistribution) error {
+	if len(distributions) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Create(&distributions).Error
+}
+func (r *CampaignRepository) GetLenderReturnDistributionForUpdate(ctx context.Context, id uuid.UUID) (*model.LenderReturnDistribution, error) {
+	var distribution model.LenderReturnDistribution
+	err := r.db.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).First(&distribution, "id = ?", id).Error
+	return &distribution, err
+}
+func (r *CampaignRepository) UpdateLenderReturnDistribution(ctx context.Context, distribution *model.LenderReturnDistribution) error {
+	return r.db.WithContext(ctx).Save(distribution).Error
+}
+func (r *CampaignRepository) ListLenderReturnDistributions(ctx context.Context, lenderID uuid.UUID) ([]model.LenderReturnDistribution, error) {
+	var distributions []model.LenderReturnDistribution
+	err := r.db.WithContext(ctx).Where("lender_user_id = ?", lenderID).Order("created_at DESC").Find(&distributions).Error
+	return distributions, err
 }
 func (r *CampaignRepository) ListCatalog(ctx context.Context, f CatalogFilter) ([]model.LoanCampaign, error) {
 	var cs []model.LoanCampaign

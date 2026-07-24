@@ -15,20 +15,65 @@ import (
 // It creates and drops a dedicated schema; application tables are never touched.
 func TestPostgresConstraintsAndRollback(t *testing.T) {
 	dsn := os.Getenv("TEST_DATABASE_DSN")
-	if dsn == "" { t.Skip("TEST_DATABASE_DSN is not configured") }
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_DSN is not configured")
+	}
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	schema := "campaign_test_" + uuid.NewString()[0:8]
-	if err := db.Exec("CREATE SCHEMA " + schema).Error; err != nil { t.Fatal(err) }
+	if err := db.Exec("CREATE SCHEMA " + schema).Error; err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() { _ = db.Exec("DROP SCHEMA " + schema + " CASCADE").Error })
-	if err := db.Exec(fmt.Sprintf("CREATE TABLE %s.milestones (id uuid PRIMARY KEY); CREATE TABLE %s.disbursements (id uuid PRIMARY KEY, milestone_id uuid NOT NULL UNIQUE); CREATE TABLE %s.proofs (id uuid PRIMARY KEY, disbursement_id uuid NOT NULL, deleted_at timestamptz); CREATE UNIQUE INDEX active_proof_per_disbursement ON %s.proofs(disbursement_id) WHERE deleted_at IS NULL;", schema, schema, schema, schema)).Error; err != nil { t.Fatal(err) }
+	if err := db.Exec(fmt.Sprintf("CREATE TABLE %s.milestones (id uuid PRIMARY KEY); CREATE TABLE %s.disbursements (id uuid PRIMARY KEY, milestone_id uuid NOT NULL UNIQUE); CREATE TABLE %s.proofs (id uuid PRIMARY KEY, disbursement_id uuid NOT NULL, deleted_at timestamptz); CREATE UNIQUE INDEX active_proof_per_disbursement ON %s.proofs(disbursement_id) WHERE deleted_at IS NULL; CREATE TABLE %s.repayments (id uuid PRIMARY KEY, schedule_id uuid NOT NULL, status varchar(50) NOT NULL, deleted_at timestamptz); CREATE UNIQUE INDEX one_active_repayment_per_schedule ON %s.repayments(schedule_id) WHERE deleted_at IS NULL AND status IN ('pending', 'verifier_checked', 'verified'); CREATE TABLE %s.distributions (id uuid PRIMARY KEY, repayment_id uuid NOT NULL, funding_id uuid NOT NULL, UNIQUE(repayment_id, funding_id));", schema, schema, schema, schema, schema, schema, schema)).Error; err != nil {
+		t.Fatal(err)
+	}
 	milestone, first, second := uuid.New(), uuid.New(), uuid.New()
-	if err := db.Exec(fmt.Sprintf("INSERT INTO %s.milestones VALUES (?)", schema), milestone).Error; err != nil { t.Fatal(err) }
-	if err := db.Exec(fmt.Sprintf("INSERT INTO %s.disbursements VALUES (?, ?)", schema), first, milestone).Error; err != nil { t.Fatal(err) }
-	if err := db.Exec(fmt.Sprintf("INSERT INTO %s.disbursements VALUES (?, ?)", schema), second, milestone).Error; err == nil { t.Fatal("expected duplicate milestone disbursement to fail") }
+	if err := db.Exec(fmt.Sprintf("INSERT INTO %s.milestones VALUES (?)", schema), milestone).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(fmt.Sprintf("INSERT INTO %s.disbursements VALUES (?, ?)", schema), first, milestone).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(fmt.Sprintf("INSERT INTO %s.disbursements VALUES (?, ?)", schema), second, milestone).Error; err == nil {
+		t.Fatal("expected duplicate milestone disbursement to fail")
+	}
 	proofA, proofB := uuid.New(), uuid.New()
-	if err := db.Exec(fmt.Sprintf("INSERT INTO %s.proofs VALUES (?, ?, NULL)", schema), proofA, first).Error; err != nil { t.Fatal(err) }
-	if err := db.Exec(fmt.Sprintf("INSERT INTO %s.proofs VALUES (?, ?, NULL)", schema), proofB, first).Error; err == nil { t.Fatal("expected duplicate active proof to fail") }
-	if err := db.Transaction(func(tx *gorm.DB) error { if err := tx.Exec(fmt.Sprintf("INSERT INTO %s.milestones VALUES (?)", schema), uuid.New()).Error; err != nil { return err }; return context.Canceled }); err == nil { t.Fatal("expected rollback transaction error") }
-	var count int64; if err := db.Raw(fmt.Sprintf("SELECT COUNT(*) FROM %s.milestones", schema)).Scan(&count).Error; err != nil { t.Fatal(err) }; if count != 1 { t.Fatalf("rollback left %d milestones", count) }
+	if err := db.Exec(fmt.Sprintf("INSERT INTO %s.proofs VALUES (?, ?, NULL)", schema), proofA, first).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(fmt.Sprintf("INSERT INTO %s.proofs VALUES (?, ?, NULL)", schema), proofB, first).Error; err == nil {
+		t.Fatal("expected duplicate active proof to fail")
+	}
+	schedule, repaymentA, repaymentB := uuid.New(), uuid.New(), uuid.New()
+	if err := db.Exec(fmt.Sprintf("INSERT INTO %s.repayments VALUES (?, ?, 'pending', NULL)", schema), repaymentA, schedule).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(fmt.Sprintf("INSERT INTO %s.repayments VALUES (?, ?, 'verifier_checked', NULL)", schema), repaymentB, schedule).Error; err == nil {
+		t.Fatal("expected duplicate active repayment to fail")
+	}
+	funding, distributionA, distributionB := uuid.New(), uuid.New(), uuid.New()
+	if err := db.Exec(fmt.Sprintf("INSERT INTO %s.distributions VALUES (?, ?, ?)", schema), distributionA, repaymentA, funding).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(fmt.Sprintf("INSERT INTO %s.distributions VALUES (?, ?, ?)", schema), distributionB, repaymentA, funding).Error; err == nil {
+		t.Fatal("expected duplicate lender distribution to fail")
+	}
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(fmt.Sprintf("INSERT INTO %s.milestones VALUES (?)", schema), uuid.New()).Error; err != nil {
+			return err
+		}
+		return context.Canceled
+	}); err == nil {
+		t.Fatal("expected rollback transaction error")
+	}
+	var count int64
+	if err := db.Raw(fmt.Sprintf("SELECT COUNT(*) FROM %s.milestones", schema)).Scan(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("rollback left %d milestones", count)
+	}
 }

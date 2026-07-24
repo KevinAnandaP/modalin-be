@@ -18,6 +18,9 @@ type proofStorage interface {
 	Delete(string) error
 	Read(string) ([]byte, error)
 }
+type categorizedProofStorage interface {
+	StoreCategory(string, *multipart.FileHeader) (string, error)
+}
 
 func (h *CampaignHandler) DownloadFundUsageProof(c *fiber.Ctx) error {
 	if h.storage == nil {
@@ -291,6 +294,327 @@ func (h *CampaignHandler) ReviewFundUsageProof(c *fiber.Ctx) error {
 	}
 	return h.result(c, nil, h.service.ReviewFundUsageProof(c.Context(), user(c), proofID, request.Decision), fiber.StatusOK)
 }
+func (h *CampaignHandler) CreateMonthlyProgressReport(c *fiber.Ctx) error {
+	campaignID, err := id(c, "id")
+	if err != nil {
+		return bad(c, "invalid campaign id")
+	}
+	input, err := h.monthlyProgressInput(c)
+	if err != nil {
+		return bad(c, err.Error())
+	}
+	value, err := h.service.CreateMonthlyProgressReport(c.Context(), user(c), campaignID, input)
+	if err != nil {
+		h.deleteMonthlyProgressProofs(input.Proofs)
+	}
+	return h.result(c, value, err, fiber.StatusCreated)
+}
+func (h *CampaignHandler) ListMonthlyProgressReports(c *fiber.Ctx) error {
+	campaignID, err := id(c, "id")
+	if err != nil {
+		return bad(c, "invalid campaign id")
+	}
+	value, err := h.service.ListOwnMonthlyProgressReports(c.Context(), user(c), campaignID)
+	return h.result(c, value, err, fiber.StatusOK)
+}
+func (h *CampaignHandler) ResubmitMonthlyProgressReport(c *fiber.Ctx) error {
+	campaignID, err := id(c, "id")
+	if err != nil {
+		return bad(c, "invalid campaign id")
+	}
+	reportID, err := id(c, "reportID")
+	if err != nil {
+		return bad(c, "invalid monthly report id")
+	}
+	input, err := h.monthlyProgressInput(c)
+	if err != nil {
+		return bad(c, err.Error())
+	}
+	value, err := h.service.ResubmitMonthlyProgressReport(c.Context(), user(c), campaignID, reportID, input)
+	if err != nil {
+		h.deleteMonthlyProgressProofs(input.Proofs)
+	}
+	return h.result(c, value, err, fiber.StatusOK)
+}
+func (h *CampaignHandler) CreateRevenueReport(c *fiber.Ctx) error {
+	campaignID, err := id(c, "id")
+	if err != nil {
+		return bad(c, "invalid campaign id")
+	}
+	input, err := h.revenueReportInput(c)
+	if err != nil {
+		return bad(c, err.Error())
+	}
+	value, err := h.service.CreateRevenueReport(c.Context(), user(c), campaignID, input)
+	if err != nil {
+		h.deleteRevenueProofs(input.Proofs)
+	}
+	return h.result(c, value, err, fiber.StatusCreated)
+}
+func (h *CampaignHandler) ListRevenueReports(c *fiber.Ctx) error {
+	campaignID, err := id(c, "id")
+	if err != nil {
+		return bad(c, "invalid campaign id")
+	}
+	value, err := h.service.ListOwnRevenueReports(c.Context(), user(c), campaignID)
+	return h.result(c, value, err, fiber.StatusOK)
+}
+func (h *CampaignHandler) ResubmitRevenueReport(c *fiber.Ctx) error {
+	campaignID, err := id(c, "id")
+	if err != nil {
+		return bad(c, "invalid campaign id")
+	}
+	reportID, err := id(c, "reportID")
+	if err != nil {
+		return bad(c, "invalid revenue report id")
+	}
+	input, err := h.revenueReportInput(c)
+	if err != nil {
+		return bad(c, err.Error())
+	}
+	value, err := h.service.ResubmitRevenueReport(c.Context(), user(c), campaignID, reportID, input)
+	if err != nil {
+		h.deleteRevenueProofs(input.Proofs)
+	}
+	return h.result(c, value, err, fiber.StatusOK)
+}
+func (h *CampaignHandler) ListRepaymentSchedules(c *fiber.Ctx) error {
+	campaignID, err := id(c, "id")
+	if err != nil {
+		return bad(c, "invalid campaign id")
+	}
+	value, err := h.service.ListOwnRepaymentSchedules(c.Context(), user(c), campaignID)
+	return h.result(c, value, err, fiber.StatusOK)
+}
+func (h *CampaignHandler) CreateRepayment(c *fiber.Ctx) error {
+	campaignID, err := id(c, "id")
+	if err != nil {
+		return bad(c, "invalid campaign id")
+	}
+	scheduleID, err := uuid.Parse(c.FormValue("schedule_id"))
+	if err != nil {
+		return bad(c, "invalid schedule id")
+	}
+	amount, err := strconv.ParseInt(c.FormValue("paid_amount"), 10, 64)
+	if err != nil {
+		return bad(c, "invalid paid amount")
+	}
+	file, err := c.FormFile("file")
+	if err != nil {
+		return bad(c, "payment proof is required")
+	}
+	url, err := h.store("repayment-proofs", file)
+	if err != nil {
+		return bad(c, err.Error())
+	}
+	value, err := h.service.CreateRepayment(c.Context(), user(c), campaignID, service.RepaymentInput{ScheduleID: scheduleID, PaidAmount: amount, PaymentProofURL: &url})
+	if err != nil {
+		_ = h.storage.Delete(url)
+	}
+	return h.result(c, value, err, fiber.StatusCreated)
+}
+func (h *CampaignHandler) VerifyRevenueReport(c *fiber.Ctx) error {
+	reportID, err := id(c, "id")
+	if err != nil {
+		return bad(c, "invalid revenue report id")
+	}
+	var request struct {
+		Decision string `json:"decision"`
+	}
+	if err := c.BodyParser(&request); err != nil {
+		return bad(c, "invalid request body")
+	}
+	return h.result(c, nil, h.service.VerifyRevenueReport(c.Context(), user(c), reportID, request.Decision), fiber.StatusOK)
+}
+func (h *CampaignHandler) VerifyMonthlyProgressReport(c *fiber.Ctx) error {
+	reportID, err := id(c, "id")
+	if err != nil {
+		return bad(c, "invalid monthly progress report id")
+	}
+	var request struct {
+		Decision string `json:"decision"`
+	}
+	if err := c.BodyParser(&request); err != nil {
+		return bad(c, "invalid request body")
+	}
+	return h.result(c, nil, h.service.VerifyMonthlyProgressReport(c.Context(), user(c), reportID, request.Decision), fiber.StatusOK)
+}
+func (h *CampaignHandler) VerifyRepayment(c *fiber.Ctx) error {
+	repaymentID, err := id(c, "id")
+	if err != nil {
+		return bad(c, "invalid repayment id")
+	}
+	var request struct {
+		Decision string `json:"decision"`
+	}
+	if err := c.BodyParser(&request); err != nil {
+		return bad(c, "invalid request body")
+	}
+	return h.result(c, nil, h.service.VerifyRepayment(c.Context(), user(c), repaymentID, request.Decision), fiber.StatusOK)
+}
+func (h *CampaignHandler) ReviewRevenueReport(c *fiber.Ctx) error {
+	reportID, err := id(c, "id")
+	if err != nil {
+		return bad(c, "invalid revenue report id")
+	}
+	var request struct {
+		Decision        string `json:"decision"`
+		VerifiedRevenue int64  `json:"verified_revenue"`
+	}
+	if err := c.BodyParser(&request); err != nil {
+		return bad(c, "invalid request body")
+	}
+	return h.result(c, nil, h.service.ReviewRevenueReport(c.Context(), user(c), reportID, request.Decision, request.VerifiedRevenue), fiber.StatusOK)
+}
+func (h *CampaignHandler) ReviewRepayment(c *fiber.Ctx) error {
+	repaymentID, err := id(c, "id")
+	if err != nil {
+		return bad(c, "invalid repayment id")
+	}
+	var request struct {
+		Decision string `json:"decision"`
+	}
+	if err := c.BodyParser(&request); err != nil {
+		return bad(c, "invalid request body")
+	}
+	return h.result(c, nil, h.service.ReviewRepayment(c.Context(), user(c), repaymentID, request.Decision), fiber.StatusOK)
+}
+func (h *CampaignHandler) MarkLenderReturnDistributed(c *fiber.Ctx) error {
+	distributionID, err := id(c, "id")
+	if err != nil {
+		return bad(c, "invalid distribution id")
+	}
+	var request struct {
+		TransferReference string `json:"transfer_reference"`
+	}
+	if err := c.BodyParser(&request); err != nil {
+		return bad(c, "invalid request body")
+	}
+	return h.result(c, nil, h.service.MarkLenderReturnDistributed(c.Context(), user(c), distributionID, request.TransferReference), fiber.StatusOK)
+}
+func (h *CampaignHandler) ConfirmDisbursement(c *fiber.Ctx) error {
+	disbursementID, err := id(c, "id")
+	if err != nil {
+		return bad(c, "invalid disbursement id")
+	}
+	file, err := c.FormFile("file")
+	if err != nil {
+		return bad(c, "transfer proof is required")
+	}
+	url, err := h.store("disbursement-proofs", file)
+	if err != nil {
+		return bad(c, err.Error())
+	}
+	value, err := h.service.ConfirmDisbursement(c.Context(), user(c), disbursementID, service.DisbursementConfirmationInput{TransferReference: c.FormValue("transfer_reference"), TransferProofURL: url})
+	if err != nil || (value != nil && value.TransferProofURL != nil && *value.TransferProofURL != url) {
+		_ = h.storage.Delete(url)
+	}
+	return h.result(c, value, err, fiber.StatusOK)
+}
+func (h *CampaignHandler) ListLenderReturnDistributions(c *fiber.Ctx) error {
+	value, err := h.service.ListLenderReturnDistributions(c.Context(), user(c))
+	return h.result(c, value, err, fiber.StatusOK)
+}
+func (h *CampaignHandler) store(category string, file *multipart.FileHeader) (string, error) {
+	if h.storage == nil {
+		return "", errors.New("proof storage is unavailable")
+	}
+	if storage, ok := h.storage.(categorizedProofStorage); ok {
+		return storage.StoreCategory(category, file)
+	}
+	return h.storage.Store(file)
+}
+func (h *CampaignHandler) files(c *fiber.Ctx) ([]*multipart.FileHeader, error) {
+	form, err := c.MultipartForm()
+	if err != nil {
+		return nil, err
+	}
+	files := append(form.File["files[]"], form.File["file"]...)
+	if len(files) == 0 {
+		return nil, errors.New("at least one proof file is required")
+	}
+	return files, nil
+}
+func (h *CampaignHandler) monthlyProgressInput(c *fiber.Ctx) (service.MonthlyProgressReportInput, error) {
+	month, err := strconv.Atoi(c.FormValue("period_month"))
+	if err != nil {
+		return service.MonthlyProgressReportInput{}, errors.New("invalid period month")
+	}
+	year, err := strconv.Atoi(c.FormValue("period_year"))
+	if err != nil {
+		return service.MonthlyProgressReportInput{}, errors.New("invalid period year")
+	}
+	files, err := h.files(c)
+	if err != nil {
+		return service.MonthlyProgressReportInput{}, err
+	}
+	proofs, err := h.storeProofs("monthly-progress-proofs", files, c.FormValue("proof_type"))
+	if err != nil {
+		return service.MonthlyProgressReportInput{}, err
+	}
+	return service.MonthlyProgressReportInput{PeriodMonth: month, PeriodYear: year, FundUsageSummary: c.FormValue("fund_usage_summary"), BusinessProgress: c.FormValue("business_progress"), IssueNote: stringPointer(c.FormValue("issue_note")), RepaymentStatus: c.FormValue("repayment_status"), Proofs: proofs}, nil
+}
+func (h *CampaignHandler) revenueReportInput(c *fiber.Ctx) (service.RevenueReportInput, error) {
+	month, err := strconv.Atoi(c.FormValue("period_month"))
+	if err != nil {
+		return service.RevenueReportInput{}, errors.New("invalid period month")
+	}
+	year, err := strconv.Atoi(c.FormValue("period_year"))
+	if err != nil {
+		return service.RevenueReportInput{}, errors.New("invalid period year")
+	}
+	revenue, err := strconv.ParseInt(c.FormValue("gross_revenue"), 10, 64)
+	if err != nil {
+		return service.RevenueReportInput{}, errors.New("invalid gross revenue")
+	}
+	transactions, err := strconv.Atoi(c.FormValue("transaction_count"))
+	if err != nil {
+		return service.RevenueReportInput{}, errors.New("invalid transaction count")
+	}
+	files, err := h.files(c)
+	if err != nil {
+		return service.RevenueReportInput{}, err
+	}
+	proofs, err := h.storeRevenueProofs(files, c.FormValue("proof_type"))
+	if err != nil {
+		return service.RevenueReportInput{}, err
+	}
+	return service.RevenueReportInput{PeriodMonth: month, PeriodYear: year, GrossRevenue: revenue, TransactionCount: transactions, BusinessStatus: c.FormValue("business_status"), Note: stringPointer(c.FormValue("note")), Proofs: proofs}, nil
+}
+func (h *CampaignHandler) storeProofs(category string, files []*multipart.FileHeader, proofType string) ([]service.MonthlyProgressProofInput, error) {
+	proofs := make([]service.MonthlyProgressProofInput, 0, len(files))
+	for _, file := range files {
+		url, err := h.store(category, file)
+		if err != nil {
+			h.deleteMonthlyProgressProofs(proofs)
+			return nil, err
+		}
+		proofs = append(proofs, service.MonthlyProgressProofInput{FileURL: url, ProofType: proofType})
+	}
+	return proofs, nil
+}
+func (h *CampaignHandler) storeRevenueProofs(files []*multipart.FileHeader, proofType string) ([]service.RevenueProofInput, error) {
+	proofs := make([]service.RevenueProofInput, 0, len(files))
+	for _, file := range files {
+		url, err := h.store("revenue-report-proofs", file)
+		if err != nil {
+			h.deleteRevenueProofs(proofs)
+			return nil, err
+		}
+		proofs = append(proofs, service.RevenueProofInput{FileURL: url, ProofType: proofType})
+	}
+	return proofs, nil
+}
+func (h *CampaignHandler) deleteMonthlyProgressProofs(proofs []service.MonthlyProgressProofInput) {
+	for _, proof := range proofs {
+		_ = h.storage.Delete(proof.FileURL)
+	}
+}
+func (h *CampaignHandler) deleteRevenueProofs(proofs []service.RevenueProofInput) {
+	for _, proof := range proofs {
+		_ = h.storage.Delete(proof.FileURL)
+	}
+}
 func (h *CampaignHandler) result(c *fiber.Ctx, v any, err error, status int) error {
 	if err == nil {
 		if v == nil {
@@ -299,13 +623,13 @@ func (h *CampaignHandler) result(c *fiber.Ctx, v any, err error, status int) err
 		return c.Status(status).JSON(fiber.Map{"data": v})
 	}
 	switch {
-	case errors.Is(err, service.ErrCampaignNotFound), errors.Is(err, service.ErrBudgetItemNotFound), errors.Is(err, service.ErrMilestoneNotFound), errors.Is(err, service.ErrDisbursementNotFound), errors.Is(err, service.ErrFundUsageProofNotFound):
+	case errors.Is(err, service.ErrCampaignNotFound), errors.Is(err, service.ErrBudgetItemNotFound), errors.Is(err, service.ErrMilestoneNotFound), errors.Is(err, service.ErrDisbursementNotFound), errors.Is(err, service.ErrFundUsageProofNotFound), errors.Is(err, service.ErrRevenueReportNotFound), errors.Is(err, service.ErrMonthlyProgressReportNotFound), errors.Is(err, service.ErrRepaymentScheduleNotFound), errors.Is(err, service.ErrRepaymentNotFound), errors.Is(err, service.ErrLenderReturnDistributionNotFound):
 		return c.Status(404).JSON(fiber.Map{"error": err.Error()})
-	case errors.Is(err, service.ErrCampaignLocked), errors.Is(err, service.ErrInvalidStatusTransition), errors.Is(err, service.ErrFundingUnavailable), errors.Is(err, service.ErrProofReviewUnavailable):
+	case errors.Is(err, service.ErrCampaignLocked), errors.Is(err, service.ErrInvalidStatusTransition), errors.Is(err, service.ErrFundingUnavailable), errors.Is(err, service.ErrProofReviewUnavailable), errors.Is(err, service.ErrRevenueReportUnavailable), errors.Is(err, service.ErrMonthlyProgressReportUnavailable), errors.Is(err, service.ErrRepaymentUnavailable), errors.Is(err, service.ErrDistributionUnavailable), errors.Is(err, service.ErrDisbursementTransferUnavailable):
 		return c.Status(409).JSON(fiber.Map{"error": err.Error()})
 	case errors.Is(err, service.ErrProofAccessDenied):
 		return c.Status(403).JSON(fiber.Map{"error": err.Error()})
-	case errors.Is(err, service.ErrAmountExceedsLimit), errors.Is(err, service.ErrInvalidCampaign), errors.Is(err, service.ErrInvalidBudgetItem), errors.Is(err, service.ErrInvalidMilestone), errors.Is(err, service.ErrIncompleteCampaignPlan), errors.Is(err, service.ErrCampaignNeedsRevision), errors.Is(err, service.ErrInvalidReviewDecision), errors.Is(err, service.ErrSelfFunding), errors.Is(err, service.ErrInvalidFundingAmount), errors.Is(err, service.ErrFundingExceedsTarget), errors.Is(err, service.ErrInvalidFundUsageProof), errors.Is(err, service.ErrInvalidProofReview):
+	case errors.Is(err, service.ErrAmountExceedsLimit), errors.Is(err, service.ErrInvalidCampaign), errors.Is(err, service.ErrInvalidBudgetItem), errors.Is(err, service.ErrInvalidMilestone), errors.Is(err, service.ErrIncompleteCampaignPlan), errors.Is(err, service.ErrCampaignNeedsRevision), errors.Is(err, service.ErrInvalidReviewDecision), errors.Is(err, service.ErrSelfFunding), errors.Is(err, service.ErrInvalidFundingAmount), errors.Is(err, service.ErrFundingExceedsTarget), errors.Is(err, service.ErrInvalidFundUsageProof), errors.Is(err, service.ErrInvalidProofReview), errors.Is(err, service.ErrInvalidRevenueReport), errors.Is(err, service.ErrInvalidRevenueReview), errors.Is(err, service.ErrInvalidRevenueVerification), errors.Is(err, service.ErrInvalidRepayment), errors.Is(err, service.ErrInvalidRepaymentReview), errors.Is(err, service.ErrInvalidRepaymentVerification), errors.Is(err, service.ErrInvalidMonthlyProgressReport), errors.Is(err, service.ErrInvalidDisbursementTransfer):
 		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	default:
 		return c.Status(500).JSON(fiber.Map{"error": "campaign operation failed"})

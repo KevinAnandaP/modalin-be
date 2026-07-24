@@ -428,21 +428,25 @@ func (f *Funding) BeforeCreate(tx *gorm.DB) (err error) {
 
 // 15. Disbursement
 type Disbursement struct {
-	ID            uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
-	CampaignID    uuid.UUID      `gorm:"type:uuid;index;not null"`
-	MilestoneID   uuid.UUID      `gorm:"type:uuid;uniqueIndex;not null"`
-	Amount        int64          `gorm:"type:bigint;not null"`
-	Method        string         `gorm:"type:varchar(50);not null"` // direct_purchase, cash_limited, bank_transfer, ewallet
-	RecipientType string         `gorm:"type:varchar(50);not null"` // borrower, merchant
-	RecipientName *string        `gorm:"type:varchar(255)"`
-	Status        string         `gorm:"type:varchar(50);default:'pending';not null"` // pending, released, proof_required, verified, rejected
-	ReleasedAt    *time.Time     `gorm:"type:timestamp"`
-	CreatedAt     time.Time      `gorm:"not null"`
-	DeletedAt     gorm.DeletedAt `gorm:"index"`
+	ID                uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	CampaignID        uuid.UUID      `gorm:"type:uuid;index;not null"`
+	MilestoneID       uuid.UUID      `gorm:"type:uuid;uniqueIndex;not null"`
+	Amount            int64          `gorm:"type:bigint;not null"`
+	Method            string         `gorm:"type:varchar(50);not null"` // direct_purchase, cash_limited, bank_transfer, ewallet
+	RecipientType     string         `gorm:"type:varchar(50);not null"` // borrower, merchant
+	RecipientName     *string        `gorm:"type:varchar(255)"`
+	Status            string         `gorm:"type:varchar(50);default:'pending_transfer';not null"` // pending_transfer, proof_required, verified, rejected
+	ReleasedAt        *time.Time     `gorm:"type:timestamp"`
+	TransferReference *string        `gorm:"type:varchar(255)"`
+	TransferProofURL  *string        `gorm:"type:text"`
+	ReleasedBy        *uuid.UUID     `gorm:"type:uuid;index"`
+	CreatedAt         time.Time      `gorm:"not null"`
+	DeletedAt         gorm.DeletedAt `gorm:"index"`
 
 	// Relations
 	Campaign  LoanCampaign      `gorm:"foreignKey:CampaignID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
 	Milestone CampaignMilestone `gorm:"foreignKey:MilestoneID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
+	Releaser  *User             `gorm:"foreignKey:ReleasedBy;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;"`
 }
 
 func (Disbursement) TableName() string {
@@ -490,25 +494,77 @@ func (fup *FundUsageProof) BeforeCreate(tx *gorm.DB) (err error) {
 
 // 17. RevenueReport
 type RevenueReport struct {
-	ID              uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
-	CampaignID      uuid.UUID      `gorm:"type:uuid;index;not null"`
-	BusinessID      uuid.UUID      `gorm:"type:uuid;index;not null"`
-	PeriodMonth     int            `gorm:"type:int;not null"`
-	PeriodYear      int            `gorm:"type:int;not null"`
-	GrossRevenue    int64          `gorm:"type:bigint;not null"`
-	VerifiedRevenue *int64         `gorm:"type:bigint"`
-	ExpenseTotal    *int64         `gorm:"type:bigint"`
-	Note            *string        `gorm:"type:text"`
-	Status          string         `gorm:"type:varchar(50);default:'draft';not null"` // draft, submitted, verified, rejected, under_review
-	VerifiedBy      *uuid.UUID     `gorm:"type:uuid;index"`
-	CreatedAt       time.Time      `gorm:"not null"`
-	DeletedAt       gorm.DeletedAt `gorm:"index"`
+	ID               uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	CampaignID       uuid.UUID      `gorm:"type:uuid;uniqueIndex:idx_revenue_report_campaign_period;not null"`
+	BusinessID       uuid.UUID      `gorm:"type:uuid;index;not null"`
+	PeriodMonth      int            `gorm:"type:int;uniqueIndex:idx_revenue_report_campaign_period;not null"`
+	PeriodYear       int            `gorm:"type:int;uniqueIndex:idx_revenue_report_campaign_period;not null"`
+	GrossRevenue     int64          `gorm:"type:bigint;not null"`
+	TransactionCount int            `gorm:"type:int;default:0;not null"`
+	BusinessStatus   string         `gorm:"type:varchar(50);default:'running';not null"`
+	VerifiedRevenue  *int64         `gorm:"type:bigint"`
+	ExpenseTotal     *int64         `gorm:"type:bigint"`
+	Note             *string        `gorm:"type:text"`
+	Status           string         `gorm:"type:varchar(50);default:'draft';not null"` // draft, submitted, verified, rejected, under_review
+	VerifiedBy       *uuid.UUID     `gorm:"type:uuid;index"`
+	CreatedAt        time.Time      `gorm:"not null"`
+	UpdatedAt        time.Time      `gorm:"not null"`
+	DeletedAt        gorm.DeletedAt `gorm:"index"`
 
 	// Relations
 	Campaign LoanCampaign         `gorm:"foreignKey:CampaignID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
 	Business Business             `gorm:"foreignKey:BusinessID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
 	Verifier *User                `gorm:"foreignKey:VerifiedBy;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;"`
 	Proofs   []RevenueReportProof `gorm:"foreignKey:RevenueReportID"`
+}
+
+// MonthlyProgressReport records mandatory borrower transparency updates for every benefit scheme.
+type MonthlyProgressReport struct {
+	ID               uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	CampaignID       uuid.UUID      `gorm:"type:uuid;uniqueIndex:idx_monthly_progress_campaign_period;not null"`
+	BusinessID       uuid.UUID      `gorm:"type:uuid;index;not null"`
+	PeriodMonth      int            `gorm:"type:int;uniqueIndex:idx_monthly_progress_campaign_period;not null"`
+	PeriodYear       int            `gorm:"type:int;uniqueIndex:idx_monthly_progress_campaign_period;not null"`
+	FundUsageSummary string         `gorm:"type:text;not null"`
+	BusinessProgress string         `gorm:"type:text;not null"`
+	IssueNote        *string        `gorm:"type:text"`
+	RepaymentStatus  string         `gorm:"type:varchar(50);not null"` // current, late, restructured
+	Status           string         `gorm:"type:varchar(50);default:'submitted';not null"`
+	CreatedAt        time.Time      `gorm:"not null"`
+	UpdatedAt        time.Time      `gorm:"not null"`
+	DeletedAt        gorm.DeletedAt `gorm:"index"`
+
+	Campaign LoanCampaign                 `gorm:"foreignKey:CampaignID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
+	Business Business                     `gorm:"foreignKey:BusinessID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
+	Proofs   []MonthlyProgressReportProof `gorm:"foreignKey:MonthlyProgressReportID"`
+}
+
+func (MonthlyProgressReport) TableName() string { return "monthly_progress_reports" }
+func (mpr *MonthlyProgressReport) BeforeCreate(tx *gorm.DB) (err error) {
+	if mpr.ID == uuid.Nil {
+		mpr.ID = uuid.New()
+	}
+	return nil
+}
+
+type MonthlyProgressReportProof struct {
+	ID                      uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	MonthlyProgressReportID uuid.UUID      `gorm:"type:uuid;index;not null"`
+	FileURL                 string         `gorm:"type:text;not null"`
+	ProofType               string         `gorm:"type:varchar(50);not null"`
+	Status                  string         `gorm:"type:varchar(50);default:'pending';not null"`
+	CreatedAt               time.Time      `gorm:"not null"`
+	DeletedAt               gorm.DeletedAt `gorm:"index"`
+
+	Report MonthlyProgressReport `gorm:"foreignKey:MonthlyProgressReportID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
+}
+
+func (MonthlyProgressReportProof) TableName() string { return "monthly_progress_report_proofs" }
+func (mprp *MonthlyProgressReportProof) BeforeCreate(tx *gorm.DB) (err error) {
+	if mprp.ID == uuid.Nil {
+		mprp.ID = uuid.New()
+	}
+	return nil
 }
 
 func (RevenueReport) TableName() string {
@@ -608,19 +664,23 @@ func (r *Repayment) BeforeCreate(tx *gorm.DB) (err error) {
 
 // 21. LenderReturnDistribution
 type LenderReturnDistribution struct {
-	ID              uuid.UUID `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
-	RepaymentID     uuid.UUID `gorm:"type:uuid;index;not null"`
-	FundingID       uuid.UUID `gorm:"type:uuid;index;not null"`
-	LenderUserID    uuid.UUID `gorm:"type:uuid;index;not null"`
-	PrincipalAmount int64     `gorm:"type:bigint;not null"`
-	BenefitAmount   int64     `gorm:"type:bigint;not null"`
-	Status          string    `gorm:"type:varchar(50);default:'pending';not null"` // pending, distributed
-	CreatedAt       time.Time `gorm:"not null"`
+	ID                uuid.UUID  `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	RepaymentID       uuid.UUID  `gorm:"type:uuid;index;not null"`
+	FundingID         uuid.UUID  `gorm:"type:uuid;index;not null"`
+	LenderUserID      uuid.UUID  `gorm:"type:uuid;index;not null"`
+	PrincipalAmount   int64      `gorm:"type:bigint;not null"`
+	BenefitAmount     int64      `gorm:"type:bigint;not null"`
+	Status            string     `gorm:"type:varchar(50);default:'pending';not null"` // pending, distributed
+	CreatedAt         time.Time  `gorm:"not null"`
+	DistributedAt     *time.Time `gorm:"type:timestamp"`
+	TransferReference *string    `gorm:"type:varchar(255)"`
+	DistributedBy     *uuid.UUID `gorm:"type:uuid;index"`
 
 	// Relations
-	Repayment Repayment `gorm:"foreignKey:RepaymentID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
-	Funding   Funding   `gorm:"foreignKey:FundingID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
-	Lender    User      `gorm:"foreignKey:LenderUserID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
+	Repayment   Repayment `gorm:"foreignKey:RepaymentID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
+	Funding     Funding   `gorm:"foreignKey:FundingID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
+	Lender      User      `gorm:"foreignKey:LenderUserID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
+	Distributor *User     `gorm:"foreignKey:DistributedBy;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;"`
 }
 
 func (LenderReturnDistribution) TableName() string {

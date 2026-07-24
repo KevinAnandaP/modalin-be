@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 
+	"modalin-be/internal/campaign/job"
 	"modalin-be/internal/router"
 	"modalin-be/pkg/config"
 	"modalin-be/pkg/database"
@@ -22,6 +23,7 @@ func main() {
 
 	// 2. Connect Database
 	database.ConnectDB()
+	job.StartRepaymentOverdueScheduler(database.DB)
 
 	// 3. Initialize Fiber Application
 	app := fiber.New(fiber.Config{
@@ -34,6 +36,10 @@ func main() {
 	app.Use(cors.New())    // CORS configuration (crucial for Vue frontend)
 	app.Get("/uploads/fund-usage-proofs/*", func(c *fiber.Ctx) error { return c.SendStatus(fiber.StatusForbidden) })
 	app.Get("/uploads/financial-proofs/*", func(c *fiber.Ctx) error { return c.SendStatus(fiber.StatusForbidden) })
+	app.Get("/uploads/monthly-progress-proofs/*", func(c *fiber.Ctx) error { return c.SendStatus(fiber.StatusForbidden) })
+	app.Get("/uploads/revenue-report-proofs/*", func(c *fiber.Ctx) error { return c.SendStatus(fiber.StatusForbidden) })
+	app.Get("/uploads/repayment-proofs/*", func(c *fiber.Ctx) error { return c.SendStatus(fiber.StatusForbidden) })
+	app.Get("/uploads/disbursement-proofs/*", func(c *fiber.Ctx) error { return c.SendStatus(fiber.StatusForbidden) })
 	app.Static("/uploads", config.AppConfig.UploadDir)
 
 	// 5. Setup Routes
