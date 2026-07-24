@@ -59,6 +59,7 @@ var (
 	ErrMonthlyProgressReportUnavailable = errors.New("monthly progress report is not awaiting review")
 	ErrLenderReturnDistributionNotFound = errors.New("lender return distribution not found")
 	ErrDistributionUnavailable          = errors.New("lender return distribution is not pending")
+	ErrFieldVerificationRequired        = errors.New("tier 3 and tier 4 campaigns require approved field verification before publication")
 )
 
 type CampaignInput struct {
@@ -129,10 +130,17 @@ type MonthlyProgressReportInput struct {
 	RepaymentStatus  string                      `json:"repayment_status"`
 	Proofs           []MonthlyProgressProofInput `json:"proofs"`
 }
-type CampaignService struct{ repo repository.Repository }
+type CampaignService struct {
+	repo          repository.Repository
+	riskRefresher func(context.Context, uuid.UUID) error
+}
 
-func NewCampaignService(repo repository.Repository) *CampaignService {
-	return &CampaignService{repo: repo}
+func NewCampaignService(repo repository.Repository, riskRefreshers ...func(context.Context, uuid.UUID) error) *CampaignService {
+	s := &CampaignService{repo: repo}
+	if len(riskRefreshers) > 0 {
+		s.riskRefresher = riskRefreshers[0]
+	}
+	return s
 }
 
 func (s *CampaignService) CreateCampaign(ctx context.Context, userID uuid.UUID, in CampaignInput) (*model.LoanCampaign, error) {
@@ -225,6 +233,19 @@ func (s *CampaignService) ReviewCampaign(ctx context.Context, adminID, id uuid.U
 	if decision == "publish" {
 		if err := s.validatePlan(ctx, c); err != nil {
 			return err
+		}
+		business, err := s.repo.GetBusinessByID(ctx, c.BusinessID)
+		if err != nil {
+			return err
+		}
+		if business.CurrentBorrowingLimit >= 5000000 {
+			approved, err := s.repo.HasApprovedFieldVerification(ctx, c.ID)
+			if err != nil {
+				return err
+			}
+			if !approved {
+				return ErrFieldVerificationRequired
+			}
 		}
 		c.Status = "published"
 		c.ApprovedBy = &adminID
@@ -699,7 +720,8 @@ func (s *CampaignService) ReviewRepayment(ctx context.Context, adminID, repaymen
 	if decision != "approve" && decision != "reject" {
 		return ErrInvalidRepaymentReview
 	}
-	return s.repo.WithTransaction(ctx, func(repo repository.Repository) error {
+	var campaignID uuid.UUID
+	err := s.repo.WithTransaction(ctx, func(repo repository.Repository) error {
 		repayment, err := repo.GetRepaymentForUpdate(ctx, repaymentID)
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return ErrRepaymentNotFound
@@ -712,7 +734,11 @@ func (s *CampaignService) ReviewRepayment(ctx context.Context, adminID, repaymen
 		}
 		if decision == "reject" {
 			repayment.Status = "rejected"
-			return repo.UpdateRepayment(ctx, repayment)
+			if err := repo.UpdateRepayment(ctx, repayment); err != nil {
+				return err
+			}
+			campaignID = repayment.CampaignID
+			return nil
 		}
 		schedule, err := repo.GetRepaymentScheduleForUpdate(ctx, repayment.ScheduleID)
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -725,6 +751,7 @@ func (s *CampaignService) ReviewRepayment(ctx context.Context, adminID, repaymen
 			return ErrInvalidStatusTransition
 		}
 		repayment.Status, schedule.Status = "verified", "paid"
+		campaignID = repayment.CampaignID
 		if err := repo.UpdateRepayment(ctx, repayment); err != nil {
 			return err
 		}
@@ -744,6 +771,13 @@ func (s *CampaignService) ReviewRepayment(ctx context.Context, adminID, repaymen
 		}
 		return audit(ctx, repo, &adminID, "repayment.verified", "repayment", repayment.ID, map[string]any{"status": "pending"}, map[string]any{"status": "verified"})
 	})
+	if err != nil {
+		return err
+	}
+	if s.riskRefresher != nil && campaignID != uuid.Nil {
+		return s.riskRefresher(ctx, campaignID)
+	}
+	return nil
 }
 func (s *CampaignService) VerifyRepayment(ctx context.Context, verifierID, repaymentID uuid.UUID, decision string) error {
 	decision = strings.ToLower(strings.TrimSpace(decision))
@@ -848,6 +882,13 @@ func (s *CampaignService) Pledge(ctx context.Context, lenderID, campaignID uuid.
 			return err
 		}
 		if business.UserID == lenderID {
+			return ErrSelfFunding
+		}
+		assigned, err := repo.IsAssignedVerifier(ctx, c.ID, lenderID)
+		if err != nil {
+			return err
+		}
+		if assigned {
 			return ErrSelfFunding
 		}
 		if c.Status != "published" {

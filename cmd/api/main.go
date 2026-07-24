@@ -40,6 +40,7 @@ func main() {
 	app.Get("/uploads/revenue-report-proofs/*", func(c *fiber.Ctx) error { return c.SendStatus(fiber.StatusForbidden) })
 	app.Get("/uploads/repayment-proofs/*", func(c *fiber.Ctx) error { return c.SendStatus(fiber.StatusForbidden) })
 	app.Get("/uploads/disbursement-proofs/*", func(c *fiber.Ctx) error { return c.SendStatus(fiber.StatusForbidden) })
+	app.Get("/uploads/verification-reports/*", func(c *fiber.Ctx) error { return c.SendStatus(fiber.StatusForbidden) })
 	app.Static("/uploads", config.AppConfig.UploadDir)
 
 	// 5. Setup Routes

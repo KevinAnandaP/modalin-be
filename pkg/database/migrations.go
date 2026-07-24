@@ -16,6 +16,29 @@ type migration struct {
 
 var applicationMigrations = []migration{
 	{
+		Version: "20260724_risk_assessment_backfill",
+		Up: []string{
+			"ALTER TABLE risk_assessments ADD COLUMN IF NOT EXISTS data_limited boolean NOT NULL DEFAULT false",
+			"ALTER TABLE risk_assessments ADD COLUMN IF NOT EXISTS missing_components text NOT NULL DEFAULT ''",
+			"UPDATE risk_assessments SET data_limited = true, missing_components = 'financial,verification,repayment,community' WHERE missing_components = ''",
+		},
+		Down: []string{
+			"ALTER TABLE risk_assessments DROP COLUMN IF EXISTS missing_components",
+			"ALTER TABLE risk_assessments DROP COLUMN IF EXISTS data_limited",
+		},
+	},
+	{
+		Version: "20260724_verification_guards",
+		Up: []string{
+			"CREATE UNIQUE INDEX IF NOT EXISTS idx_verification_requests_one_active_per_campaign ON verification_requests (campaign_id) WHERE deleted_at IS NULL AND status IN ('pending', 'assigned', 'reviewed')",
+			"CREATE UNIQUE INDEX IF NOT EXISTS idx_community_votes_one_active_per_business_user ON community_votes (business_id, user_id) WHERE deleted_at IS NULL",
+		},
+		Down: []string{
+			"DROP INDEX IF EXISTS idx_community_votes_one_active_per_business_user",
+			"DROP INDEX IF EXISTS idx_verification_requests_one_active_per_campaign",
+		},
+	},
+	{
 		Version: "20260724_repayment_guards",
 		Up: []string{
 			"CREATE UNIQUE INDEX IF NOT EXISTS idx_repayments_one_active_per_schedule ON repayments (schedule_id) WHERE deleted_at IS NULL AND status IN ('pending', 'verifier_checked', 'verified')",

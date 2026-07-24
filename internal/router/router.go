@@ -13,6 +13,9 @@ import (
 	campaignService "modalin-be/internal/campaign/service"
 	campaignStorage "modalin-be/internal/campaign/storage"
 	healthHandler "modalin-be/internal/health/handler"
+	verificationHandler "modalin-be/internal/verification/handler"
+	verificationRepository "modalin-be/internal/verification/repository"
+	verificationService "modalin-be/internal/verification/service"
 	"modalin-be/pkg/config"
 	"modalin-be/pkg/database"
 	"modalin-be/pkg/middleware"
@@ -32,8 +35,10 @@ func SetupRoutes(app *fiber.App) {
 	// Initialize Handlers
 	health := healthHandler.NewHealthHandler()
 	auth := authHandler.NewAuthHandler(authService.NewAuthService(authRepository.NewAuthRepository(database.DB), config.AppConfig.JWTSecret))
-	business := businessHandler.NewBusinessHandler(businessService.NewBusinessService(businessRepository.NewBusinessRepository(database.DB)), businessStorage.NewLocalProofStorage(config.AppConfig.UploadDir, "/uploads"))
-	campaign := campaignHandler.NewCampaignHandler(campaignService.NewCampaignService(campaignRepository.NewCampaignRepository(database.DB)), campaignStorage.NewLocalProofStorage(config.AppConfig.UploadDir, "/uploads"))
+	verificationSvc := verificationService.New(verificationRepository.New(database.DB))
+	business := businessHandler.NewBusinessHandler(businessService.NewBusinessService(businessRepository.NewBusinessRepository(database.DB), verificationSvc.RefreshBusinessRisk), businessStorage.NewLocalProofStorage(config.AppConfig.UploadDir, "/uploads"))
+	campaign := campaignHandler.NewCampaignHandler(campaignService.NewCampaignService(campaignRepository.NewCampaignRepository(database.DB), verificationSvc.RefreshCampaignRisk), campaignStorage.NewLocalProofStorage(config.AppConfig.UploadDir, "/uploads"))
+	verification := verificationHandler.New(verificationSvc, campaignStorage.NewLocalProofStorage(config.AppConfig.UploadDir, "/uploads"))
 
 	// Register Routes
 	app.Get("/health", health.CheckHealth)
@@ -90,6 +95,9 @@ func SetupRoutes(app *fiber.App) {
 	lenderRoutes.Get("/return-distributions", campaign.ListLenderReturnDistributions)
 	protectedCampaignRoutes := v1.Group("/campaigns", middleware.JWTProtected(config.AppConfig.JWTSecret))
 	protectedCampaignRoutes.Get("/:id/fund-usage-proofs/:proofID/download", campaign.DownloadFundUsageProof)
+	protectedCampaignRoutes.Post("/:id/verification-requests", middleware.RequireRole("borrower"), middleware.SensitiveActionRateLimit(), verification.CreateRequest)
+	v1.Post("/businesses/:id/community-vote", middleware.JWTProtected(config.AppConfig.JWTSecret), middleware.SensitiveActionRateLimit(), verification.Vote)
+	v1.Get("/verification-requests/:id/photo/download", middleware.JWTProtected(config.AppConfig.JWTSecret), verification.DownloadPhoto)
 	campaignRoutes := v1.Group("/campaigns", middleware.JWTProtected(config.AppConfig.JWTSecret), middleware.RequireRole("borrower"))
 	campaignRoutes.Post("/", campaign.Create)
 	campaignRoutes.Get("/me", campaign.ListMine)
@@ -116,6 +124,15 @@ func SetupRoutes(app *fiber.App) {
 	verifierRoutes.Post("/monthly-reports/:id/review", middleware.SensitiveActionRateLimit(), campaign.VerifyMonthlyProgressReport)
 	verifierRoutes.Post("/revenue-reports/:id/review", middleware.SensitiveActionRateLimit(), campaign.VerifyRevenueReport)
 	verifierRoutes.Post("/repayments/:id/review", middleware.SensitiveActionRateLimit(), campaign.VerifyRepayment)
+	verifierRoutes.Get("/verification-requests", verification.ListMine)
+	verifierRoutes.Post("/verification-requests/:id/report", middleware.SensitiveActionRateLimit(), verification.SubmitReport)
+	verifierRoutes.Post("/verification-requests/:id/photo", middleware.SensitiveActionRateLimit(), verification.UploadPhoto)
+	adminRoutes.Get("/verification-requests", verification.ListAdmin)
+	adminRoutes.Post("/verification-requests/:id/assign", middleware.SensitiveActionRateLimit(), verification.Assign)
+	adminRoutes.Post("/verification-requests/:id/reassign", middleware.SensitiveActionRateLimit(), verification.Reassign)
+	adminRoutes.Post("/verification-requests/:id/cancel", middleware.SensitiveActionRateLimit(), verification.Cancel)
+	adminRoutes.Post("/risk-assessments/backfill", middleware.SensitiveActionRateLimit(), verification.BackfillRisks)
+	adminRoutes.Post("/verification-requests/:id/decision", middleware.SensitiveActionRateLimit(), verification.Decide)
 	adminRoutes.Post("/campaigns/:id/review", campaign.Review)
 	adminRoutes.Post("/disbursements/:id/confirm-transfer", middleware.SensitiveActionRateLimit(), campaign.ConfirmDisbursement)
 	adminRoutes.Post("/fund-usage-proofs/:proofID/review", campaign.ReviewFundUsageProof)

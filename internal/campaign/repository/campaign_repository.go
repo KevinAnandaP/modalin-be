@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"strings"
+	"time"
 
 	"modalin-be/internal/model"
 
@@ -12,8 +13,8 @@ import (
 )
 
 type CatalogFilter struct {
-	Query, Category, RiskLevel string
-	MinAmount, MaxAmount       int64
+	Query, Category, RiskLevel                       string
+	MinAmount, MaxAmount, MinRiskScore, MaxRiskScore int64
 }
 
 type Repository interface {
@@ -81,6 +82,8 @@ type Repository interface {
 	UpdateLenderReturnDistribution(context.Context, *model.LenderReturnDistribution) error
 	ListLenderReturnDistributions(context.Context, uuid.UUID) ([]model.LenderReturnDistribution, error)
 	ListCatalog(context.Context, CatalogFilter) ([]model.LoanCampaign, error)
+	HasApprovedFieldVerification(context.Context, uuid.UUID) (bool, error)
+	IsAssignedVerifier(context.Context, uuid.UUID, uuid.UUID) (bool, error)
 }
 
 type CampaignRepository struct{ db *gorm.DB }
@@ -383,6 +386,69 @@ func (r *CampaignRepository) ListCatalog(ctx context.Context, f CatalogFilter) (
 	if f.MaxAmount > 0 {
 		q = q.Where("requested_amount <= ?", f.MaxAmount)
 	}
+	if f.MinRiskScore > 0 || f.MaxRiskScore > 0 {
+		q = q.Joins("JOIN LATERAL (SELECT final_score FROM risk_assessments WHERE campaign_id = loan_campaigns.id ORDER BY created_at DESC, id DESC LIMIT 1) latest_risk ON TRUE")
+		if f.MinRiskScore > 0 {
+			q = q.Where("latest_risk.final_score >= ?", f.MinRiskScore)
+		}
+		if f.MaxRiskScore > 0 {
+			q = q.Where("latest_risk.final_score <= ?", f.MaxRiskScore)
+		}
+	}
 	err := q.Order("loan_campaigns.created_at DESC").Find(&cs).Error
-	return cs, err
+	if err != nil || len(cs) == 0 {
+		return cs, err
+	}
+	ids := make([]uuid.UUID, len(cs))
+	for i := range cs {
+		ids[i] = cs[i].ID
+	}
+	var assessments []model.RiskAssessment
+	if err := r.db.WithContext(ctx).Where("campaign_id IN ?", ids).Order("created_at DESC").Find(&assessments).Error; err != nil {
+		return nil, err
+	}
+	latest := map[uuid.UUID]*model.RiskAssessment{}
+	for i := range assessments {
+		if latest[assessments[i].CampaignID] == nil {
+			latest[assessments[i].CampaignID] = &assessments[i]
+		}
+	}
+	for i := range cs {
+		cs[i].LatestRiskAssessment = latest[cs[i].ID]
+		if cs[i].LatestRiskAssessment != nil && cs[i].LatestRiskAssessment.MissingComponentsRaw != "" {
+			cs[i].LatestRiskAssessment.MissingComponents = strings.Split(cs[i].LatestRiskAssessment.MissingComponentsRaw, ",")
+		}
+	}
+	var summaries []struct {
+		CampaignID       uuid.UUID
+		Status           string
+		ReportedAt       time.Time
+		IsBusinessExists bool
+		IsBusinessActive bool
+		LocationMatch    bool
+		Recommendation   string
+	}
+	if err := r.db.WithContext(ctx).Table("verification_requests").Select("verification_requests.campaign_id, verification_requests.status, verification_reports.created_at AS reported_at, verification_reports.is_business_exists, verification_reports.is_business_active, verification_reports.location_match, verification_reports.recommendation").Joins("JOIN verification_reports ON verification_reports.verification_request_id = verification_requests.id").Where("verification_requests.campaign_id IN ? AND verification_requests.status = ?", ids, "approved").Order("verification_reports.created_at DESC, verification_reports.id DESC").Scan(&summaries).Error; err != nil {
+		return nil, err
+	}
+	latestSummary := map[uuid.UUID]*model.VerificationSummary{}
+	for _, row := range summaries {
+		if latestSummary[row.CampaignID] == nil {
+			latestSummary[row.CampaignID] = &model.VerificationSummary{Status: row.Status, ReportedAt: row.ReportedAt, IsBusinessExists: row.IsBusinessExists, IsBusinessActive: row.IsBusinessActive, LocationMatch: row.LocationMatch, Recommendation: row.Recommendation}
+		}
+	}
+	for i := range cs {
+		cs[i].VerificationSummary = latestSummary[cs[i].ID]
+	}
+	return cs, nil
+}
+func (r *CampaignRepository) HasApprovedFieldVerification(ctx context.Context, campaignID uuid.UUID) (bool, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&model.VerificationRequest{}).Where("campaign_id = ? AND status = ?", campaignID, "approved").Count(&count).Error
+	return count > 0, err
+}
+func (r *CampaignRepository) IsAssignedVerifier(ctx context.Context, campaignID, userID uuid.UUID) (bool, error) {
+	var n int64
+	err := r.db.WithContext(ctx).Model(&model.VerificationRequest{}).Where("campaign_id = ? AND assigned_verifier_id = ? AND status IN ?", campaignID, userID, []string{"assigned", "reviewed"}).Count(&n).Error
+	return n > 0, err
 }

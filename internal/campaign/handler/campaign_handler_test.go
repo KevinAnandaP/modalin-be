@@ -81,7 +81,7 @@ func TestCatalogIsPublicAndPassesSearchFilters(t *testing.T) {
 	repo := &catalogRepo{}
 	app := fiber.New()
 	app.Get("/campaigns", NewCampaignHandler(service.NewCampaignService(repo)).Catalog)
-	request := httptest.NewRequest("GET", "/campaigns?search=warung&category=kuliner&risk_level=low&min_amount=100000&max_amount=500000", nil)
+	request := httptest.NewRequest("GET", "/campaigns?search=warung&category=kuliner&risk_level=low&min_amount=100000&max_amount=500000&min_risk_score=70&max_risk_score=90", nil)
 	response, err := app.Test(request)
 	if err != nil {
 		t.Fatal(err)
@@ -89,8 +89,20 @@ func TestCatalogIsPublicAndPassesSearchFilters(t *testing.T) {
 	if response.StatusCode != fiber.StatusOK {
 		t.Fatalf("expected 200, got %d", response.StatusCode)
 	}
-	if repo.received.Query != "warung" || repo.received.Category != "kuliner" || repo.received.RiskLevel != "low" || repo.received.MinAmount != 100000 || repo.received.MaxAmount != 500000 {
+	if repo.received.Query != "warung" || repo.received.Category != "kuliner" || repo.received.RiskLevel != "low" || repo.received.MinAmount != 100000 || repo.received.MaxAmount != 500000 || repo.received.MinRiskScore != 70 || repo.received.MaxRiskScore != 90 {
 		t.Fatalf("unexpected catalog filter: %#v", repo.received)
+	}
+}
+
+func TestCatalogRejectsInvalidRiskScoreRange(t *testing.T) {
+	app := fiber.New()
+	app.Get("/campaigns", NewCampaignHandler(service.NewCampaignService(&catalogRepo{})).Catalog)
+	response, err := app.Test(httptest.NewRequest("GET", "/campaigns?min_risk_score=90&max_risk_score=70", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != fiber.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", response.StatusCode)
 	}
 }
 

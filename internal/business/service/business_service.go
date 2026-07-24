@@ -81,11 +81,16 @@ type UpdateFinancialRecordInput struct {
 }
 
 type BusinessService struct {
-	repo repository.Repository
+	repo        repository.Repository
+	riskRefresh func(context.Context, uuid.UUID) error
 }
 
-func NewBusinessService(repo repository.Repository) *BusinessService {
-	return &BusinessService{repo: repo}
+func NewBusinessService(repo repository.Repository, refreshers ...func(context.Context, uuid.UUID) error) *BusinessService {
+	s := &BusinessService{repo: repo}
+	if len(refreshers) > 0 {
+		s.riskRefresh = refreshers[0]
+	}
+	return s
 }
 
 func (s *BusinessService) CreateBusiness(ctx context.Context, userID uuid.UUID, in CreateBusinessInput) (*model.Business, error) {
@@ -286,6 +291,11 @@ func (s *BusinessService) CreateFinancialRecord(ctx context.Context, userID uuid
 		return nil, err
 	}
 
+	if s.riskRefresh != nil {
+		if err := s.riskRefresh(ctx, business.ID); err != nil {
+			return nil, err
+		}
+	}
 	return record, nil
 }
 
@@ -333,6 +343,11 @@ func (s *BusinessService) UpdateFinancialRecord(ctx context.Context, userID, rec
 	record.Note = in.Note
 	if err := s.repo.UpdateFinancialRecord(ctx, record); err != nil {
 		return nil, err
+	}
+	if s.riskRefresh != nil {
+		if err := s.riskRefresh(ctx, record.BusinessID); err != nil {
+			return nil, err
+		}
 	}
 	return record, nil
 }
@@ -399,7 +414,13 @@ func (s *BusinessService) DeleteFinancialRecord(ctx context.Context, userID uuid
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return ErrFinancialRecordNotFound
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	if s.riskRefresh != nil {
+		return s.riskRefresh(ctx, business.ID)
+	}
+	return nil
 }
 
 func normalizeProofType(proofType string) string {
