@@ -3,7 +3,7 @@
 Backend API untuk proyek Modalin menggunakan **Golang**, **Fiber v2**, **GORM**, dan **PostgreSQL** dengan struktur proyek berbasis fitur di dalam `internal/` (Standard Go Project Layout).
 
 ## Prasyarat
-- Go 1.20+
+- Go 1.26.5+
 - PostgreSQL
 
 ## Struktur Proyek Utama

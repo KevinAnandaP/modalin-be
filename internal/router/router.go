@@ -1,6 +1,9 @@
 package router
 
 import (
+	auditHandler "modalin-be/internal/audit/handler"
+	auditRepository "modalin-be/internal/audit/repository"
+	auditService "modalin-be/internal/audit/service"
 	authHandler "modalin-be/internal/auth/handler"
 	authRepository "modalin-be/internal/auth/repository"
 	authService "modalin-be/internal/auth/service"
@@ -12,7 +15,13 @@ import (
 	campaignRepository "modalin-be/internal/campaign/repository"
 	campaignService "modalin-be/internal/campaign/service"
 	campaignStorage "modalin-be/internal/campaign/storage"
+	disputeHandler "modalin-be/internal/dispute/handler"
+	disputeRepository "modalin-be/internal/dispute/repository"
+	disputeService "modalin-be/internal/dispute/service"
 	healthHandler "modalin-be/internal/health/handler"
+	restructuringHandler "modalin-be/internal/restructuring/handler"
+	restructuringRepository "modalin-be/internal/restructuring/repository"
+	restructuringService "modalin-be/internal/restructuring/service"
 	verificationHandler "modalin-be/internal/verification/handler"
 	verificationRepository "modalin-be/internal/verification/repository"
 	verificationService "modalin-be/internal/verification/service"
@@ -34,21 +43,29 @@ func SetupRoutes(app *fiber.App) {
 
 	// Initialize Handlers
 	health := healthHandler.NewHealthHandler()
-	auth := authHandler.NewAuthHandler(authService.NewAuthService(authRepository.NewAuthRepository(database.DB), config.AppConfig.JWTSecret))
+	authSvc := authService.NewAuthServiceWithGoogleVerifier(authRepository.NewAuthRepository(database.DB), config.AppConfig.JWTSecret, authService.NewGoogleIDTokenVerifier(config.AppConfig.GoogleOAuthClientIDs))
+	auth := authHandler.NewAuthHandler(authSvc)
+	authenticated := middleware.JWTProtected(config.AppConfig.JWTSecret, authSvc)
 	verificationSvc := verificationService.New(verificationRepository.New(database.DB))
 	business := businessHandler.NewBusinessHandler(businessService.NewBusinessService(businessRepository.NewBusinessRepository(database.DB), verificationSvc.RefreshBusinessRisk), businessStorage.NewLocalProofStorage(config.AppConfig.UploadDir, "/uploads"))
 	campaign := campaignHandler.NewCampaignHandler(campaignService.NewCampaignService(campaignRepository.NewCampaignRepository(database.DB), verificationSvc.RefreshCampaignRisk), campaignStorage.NewLocalProofStorage(config.AppConfig.UploadDir, "/uploads"))
 	verification := verificationHandler.New(verificationSvc, campaignStorage.NewLocalProofStorage(config.AppConfig.UploadDir, "/uploads"))
+	audit := auditHandler.New(auditService.New(auditRepository.New(database.DB)))
+	dispute := disputeHandler.New(disputeService.New(disputeRepository.New(database.DB)))
+	restructuring := restructuringHandler.New(restructuringService.New(restructuringRepository.New(database.DB)))
 
 	// Register Routes
-	app.Get("/health", health.CheckHealth)
+	app.Get("/health", health.Live)
+	app.Get("/ready", health.Ready)
+	app.Get("/metrics", middleware.MetricsHandler(middleware.DefaultRequestMetrics))
 
 	// API group for future endpoints
 	api := app.Group("/api")
 	v1 := api.Group("/v1")
 
 	// Register API v1 Routes
-	v1.Get("/health", health.CheckHealth)
+	v1.Get("/health", health.Live)
+	v1.Get("/ready", health.Ready)
 	v1.Get("/ping", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{
 			"message": "pong",
@@ -56,27 +73,33 @@ func SetupRoutes(app *fiber.App) {
 	})
 
 	authRoutes := v1.Group("/auth")
-	authRoutes.Post("/register", auth.Register)
-	authRoutes.Post("/login", auth.Login)
-	authRoutes.Post("/google", auth.GoogleAuth)
+	authRoutes.Post("/register", middleware.RegistrationRateLimit(), auth.Register)
+	authRoutes.Post("/login", middleware.LoginRateLimit(), auth.Login)
+	authRoutes.Post("/google", middleware.GoogleAuthRateLimit(), auth.GoogleAuth)
 	authRoutes.Post("/google/complete", auth.CompleteGoogleAuth)
-	authRoutes.Get("/me", middleware.JWTProtected(config.AppConfig.JWTSecret), auth.Me)
-	authRoutes.Post("/roles", middleware.JWTProtected(config.AppConfig.JWTSecret), auth.RequestRole)
+	authRoutes.Get("/me", authenticated, auth.Me)
+	authRoutes.Post("/roles", authenticated, auth.RequestRole)
 
 	// Admin Role Management Routes
-	adminRoutes := v1.Group("/admin", middleware.JWTProtected(config.AppConfig.JWTSecret), middleware.RequireRole("admin"))
+	adminRoutes := v1.Group("/admin", authenticated, middleware.RequireRole("admin"))
 	adminRoutes.Get("/roles/requests", auth.GetRoleRequests)
 	adminRoutes.Post("/roles/review", auth.ReviewRoleRequest)
+	adminRoutes.Get("/audit-logs", audit.List)
+	adminRoutes.Get("/disputes", dispute.ListAdmin)
+	adminRoutes.Post("/disputes/:id/review", middleware.SensitiveActionRateLimit(), dispute.Review)
+	adminRoutes.Post("/disputes/:id/decision", middleware.SensitiveActionRateLimit(), dispute.Decide)
+	adminRoutes.Post("/repayment-restructuring-requests/:id/decision", middleware.SensitiveActionRateLimit(), restructuring.Decide)
+	adminRoutes.Get("/repayment-restructuring-requests", restructuring.ListAdmin)
 
 	// Business Management Routes (Protected Borrower)
-	businessRoutes := v1.Group("/businesses", middleware.JWTProtected(config.AppConfig.JWTSecret), middleware.RequireRole("borrower"))
+	businessRoutes := v1.Group("/businesses", authenticated, middleware.RequireRole("borrower"))
 	businessRoutes.Post("/", business.CreateBusiness)
 	businessRoutes.Get("/me", business.GetMyBusiness)
 	businessRoutes.Put("/me", business.UpdateBusiness)
 	businessRoutes.Delete("/me", business.DeactivateBusiness)
 
 	// Financial Record Routes (Protected Borrower)
-	finRoutes := v1.Group("/financial-records", middleware.JWTProtected(config.AppConfig.JWTSecret), middleware.RequireRole("borrower"))
+	finRoutes := v1.Group("/financial-records", authenticated, middleware.RequireRole("borrower"))
 	finRoutes.Post("/", business.CreateFinancialRecord)
 	finRoutes.Get("/", business.GetFinancialRecords)
 	finRoutes.Get("/summary", business.GetFinancialSummary)
@@ -88,17 +111,21 @@ func SetupRoutes(app *fiber.App) {
 
 	// Loan campaign management (borrower) and public catalogue.
 	v1.Get("/campaigns", campaign.Catalog)
-	lenderCampaignRoutes := v1.Group("/campaigns", middleware.JWTProtected(config.AppConfig.JWTSecret), middleware.RequireRole("lender"))
+	lenderCampaignRoutes := v1.Group("/campaigns", authenticated, middleware.RequireRole("lender"))
 	lenderCampaignRoutes.Post("/:id/fundings", campaign.Pledge)
 	lenderCampaignRoutes.Get("/fundings/me", campaign.ListLenderFundings)
-	lenderRoutes := v1.Group("/lender", middleware.JWTProtected(config.AppConfig.JWTSecret), middleware.RequireRole("lender"))
+	lenderRoutes := v1.Group("/lender", authenticated, middleware.RequireRole("lender"))
 	lenderRoutes.Get("/return-distributions", campaign.ListLenderReturnDistributions)
-	protectedCampaignRoutes := v1.Group("/campaigns", middleware.JWTProtected(config.AppConfig.JWTSecret))
+	protectedCampaignRoutes := v1.Group("/campaigns", authenticated)
 	protectedCampaignRoutes.Get("/:id/fund-usage-proofs/:proofID/download", campaign.DownloadFundUsageProof)
+	protectedCampaignRoutes.Post("/:id/disputes", middleware.SensitiveActionRateLimit(), dispute.Create)
+	protectedCampaignRoutes.Get("/:id/disputes", dispute.List)
+	protectedCampaignRoutes.Post("/:id/repayment-restructuring-requests", middleware.RequireRole("borrower"), middleware.SensitiveActionRateLimit(), restructuring.Create)
+	protectedCampaignRoutes.Get("/:id/repayment-restructuring-requests", middleware.RequireRole("borrower"), restructuring.List)
 	protectedCampaignRoutes.Post("/:id/verification-requests", middleware.RequireRole("borrower"), middleware.SensitiveActionRateLimit(), verification.CreateRequest)
-	v1.Post("/businesses/:id/community-vote", middleware.JWTProtected(config.AppConfig.JWTSecret), middleware.SensitiveActionRateLimit(), verification.Vote)
-	v1.Get("/verification-requests/:id/photo/download", middleware.JWTProtected(config.AppConfig.JWTSecret), verification.DownloadPhoto)
-	campaignRoutes := v1.Group("/campaigns", middleware.JWTProtected(config.AppConfig.JWTSecret), middleware.RequireRole("borrower"))
+	v1.Post("/businesses/:id/community-vote", authenticated, middleware.SensitiveActionRateLimit(), verification.Vote)
+	v1.Get("/verification-requests/:id/photo/download", authenticated, verification.DownloadPhoto)
+	campaignRoutes := v1.Group("/campaigns", authenticated, middleware.RequireRole("borrower"))
 	campaignRoutes.Post("/", campaign.Create)
 	campaignRoutes.Get("/me", campaign.ListMine)
 	campaignRoutes.Get("/:id", campaign.GetMine)
@@ -120,7 +147,7 @@ func SetupRoutes(app *fiber.App) {
 	campaignRoutes.Post("/:id/revenue-reports/:reportID/resubmit", middleware.SensitiveActionRateLimit(), campaign.ResubmitRevenueReport)
 	campaignRoutes.Get("/:id/repayment-schedules", campaign.ListRepaymentSchedules)
 	campaignRoutes.Post("/:id/repayments", middleware.SensitiveActionRateLimit(), campaign.CreateRepayment)
-	verifierRoutes := v1.Group("/verifier", middleware.JWTProtected(config.AppConfig.JWTSecret), middleware.RequireRole("verifier"))
+	verifierRoutes := v1.Group("/verifier", authenticated, middleware.RequireRole("verifier"))
 	verifierRoutes.Post("/monthly-reports/:id/review", middleware.SensitiveActionRateLimit(), campaign.VerifyMonthlyProgressReport)
 	verifierRoutes.Post("/revenue-reports/:id/review", middleware.SensitiveActionRateLimit(), campaign.VerifyRevenueReport)
 	verifierRoutes.Post("/repayments/:id/review", middleware.SensitiveActionRateLimit(), campaign.VerifyRepayment)

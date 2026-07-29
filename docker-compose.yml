@@ -7,12 +7,10 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in your environment or configs/.env}
       POSTGRES_DB: modalin-db
-    ports:
-      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d modalin-db"]
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d modalin-db" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -24,8 +22,9 @@ services:
     container_name: modalin-be-app
     restart: on-failure
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     environment:
+      APP_ENV: production
       PORT: 8080
       DB_HOST: db
       DB_PORT: 5432
@@ -35,11 +34,34 @@ services:
       DB_SSLMODE: disable
       DB_TIMEZONE: Asia/Jakarta
       UPLOAD_DIR: /app/uploads
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in your environment or configs/.env}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?set CORS_ALLOWED_ORIGINS in your environment or configs/.env}
     depends_on:
       db:
         condition: service_healthy
     volumes:
       - uploads_data:/app/uploads
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    profiles: [ "migrate" ]
+    command: [ "./migrate" ]
+    environment:
+      APP_ENV: production
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in your environment or configs/.env}
+      DB_NAME: modalin-db
+      DB_SSLMODE: disable
+      DB_TIMEZONE: Asia/Jakarta
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in your environment or configs/.env}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?set CORS_ALLOWED_ORIGINS in your environment or configs/.env}
+    depends_on:
+      db:
+        condition: service_healthy
 
 volumes:
   postgres_data:

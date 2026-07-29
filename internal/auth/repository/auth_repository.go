@@ -19,6 +19,7 @@ type Repository interface {
 	CreateRoleRequest(context.Context, *model.RoleRequest) error
 	HasOpenRoleRequest(context.Context, uuid.UUID, int) (bool, error)
 	GetApprovedRoles(context.Context, uuid.UUID) ([]string, error)
+	GetAuthorizationState(context.Context, uuid.UUID) (string, uint64, []string, error)
 	GetRoleRequests(ctx context.Context, status string) ([]model.RoleRequest, error)
 	FindRoleRequestByID(ctx context.Context, id uuid.UUID) (*model.RoleRequest, error)
 	UpdateRoleRequest(ctx context.Context, request *model.RoleRequest) error
@@ -84,6 +85,24 @@ func (r *AuthRepository) GetApprovedRoles(ctx context.Context, userID uuid.UUID)
 		Where("user_roles.user_id = ? AND user_roles.status = ?", userID, "approved").
 		Pluck("roles.name", &roles).Error
 	return roles, err
+}
+
+func (r *AuthRepository) GetAuthorizationState(ctx context.Context, userID uuid.UUID) (string, uint64, []string, error) {
+	var user struct {
+		Status       string
+		TokenVersion uint64
+	}
+	if err := r.db.WithContext(ctx).Model(&model.User{}).Select("status", "token_version").First(&user, "id = ?", userID).Error; err != nil {
+		return "", 0, nil, err
+	}
+	roles, err := r.GetApprovedRoles(ctx, userID)
+	if err != nil {
+		return "", 0, nil, err
+	}
+	if user.TokenVersion < 1 {
+		user.TokenVersion = 1
+	}
+	return user.Status, user.TokenVersion, roles, nil
 }
 
 func (r *AuthRepository) GetRoleRequests(ctx context.Context, status string) ([]model.RoleRequest, error) {

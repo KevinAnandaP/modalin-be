@@ -26,6 +26,17 @@ type fakeRepository struct {
 	approvedRoleID  int
 }
 
+type fakeGoogleVerifier struct {
+	identity service.GoogleIdentity
+	err      error
+	token    string
+}
+
+func (v *fakeGoogleVerifier) Verify(_ context.Context, token string) (service.GoogleIdentity, error) {
+	v.token = token
+	return v.identity, v.err
+}
+
 func (r *fakeRepository) CreateUser(_ context.Context, user *model.User) error {
 	r.createdUser = user
 	user.ID = uuid.New()
@@ -64,6 +75,12 @@ func (r *fakeRepository) HasOpenRoleRequest(_ context.Context, _ uuid.UUID, _ in
 }
 func (r *fakeRepository) GetApprovedRoles(_ context.Context, _ uuid.UUID) ([]string, error) {
 	return r.roles, nil
+}
+func (r *fakeRepository) GetAuthorizationState(_ context.Context, id uuid.UUID) (string, uint64, []string, error) {
+	if r.user == nil || r.user.ID != id {
+		return "", 0, nil, gorm.ErrRecordNotFound
+	}
+	return r.user.Status, r.user.TokenVersion, r.roles, nil
 }
 func (r *fakeRepository) GetRoleRequests(_ context.Context, _ string) ([]model.RoleRequest, error) {
 	if r.createdRequest != nil {
@@ -127,7 +144,7 @@ func TestLoginIssuesTokenWithApprovedRoles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	user := &model.User{ID: uuid.New(), Email: "budi@example.com", PasswordHash: string(hash), Status: "active"}
+	user := &model.User{ID: uuid.New(), Email: "budi@example.com", PasswordHash: string(hash), Status: "active", TokenVersion: 3}
 	svc := service.NewAuthService(&fakeRepository{user: user, roles: []string{"lender"}}, "test-secret")
 	result, err := svc.Login(context.Background(), user.Email, password)
 	if err != nil {
@@ -141,26 +158,64 @@ func TestLoginIssuesTokenWithApprovedRoles(t *testing.T) {
 	if len(roles) != 1 || roles[0] != "lender" {
 		t.Fatalf("unexpected roles: %#v", roles)
 	}
+	if version := parsed.Claims.(jwt.MapClaims)["token_version"]; version != float64(3) {
+		t.Fatalf("unexpected token version: %#v", version)
+	}
 }
 
-func TestGoogleAuthNewUserReturnsTempToken(t *testing.T) {
-	repo := &fakeRepository{}
-	svc := service.NewAuthService(repo, "test-secret")
-
-	res, err := svc.GoogleAuth(context.Background(), "google-sub-123", "googleuser@gmail.com", "Google User")
+func TestAuthorizationStateUsesPersistedStatusVersionAndRoles(t *testing.T) {
+	user := &model.User{ID: uuid.New(), Status: "active", TokenVersion: 4}
+	svc := service.NewAuthService(&fakeRepository{user: user, roles: []string{"lender"}}, "test-secret")
+	status, version, roles, err := svc.GetAuthorizationState(context.Background(), user.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !res.IsNewUser || res.TempToken == "" || res.Prefill.Email != "googleuser@gmail.com" {
+	if status != "active" || version != 4 || len(roles) != 1 || roles[0] != "lender" {
+		t.Fatalf("unexpected authorization state: status=%q version=%d roles=%#v", status, version, roles)
+	}
+}
+
+func TestGoogleAuthNewUserReturnsTempTokenFromVerifiedIdentity(t *testing.T) {
+	repo := &fakeRepository{}
+	verifier := &fakeGoogleVerifier{identity: service.GoogleIdentity{Subject: "google-sub-123", Email: "googleuser@gmail.com", FullName: "Google User", EmailVerified: true}}
+	svc := service.NewAuthServiceWithGoogleVerifier(repo, "test-secret", verifier)
+
+	res, err := svc.GoogleAuth(context.Background(), "signed-google-id-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verifier.token != "signed-google-id-token" || !res.IsNewUser || res.TempToken == "" || res.Prefill.Email != "googleuser@gmail.com" {
 		t.Fatalf("unexpected google auth result: %#v", res)
+	}
+}
+
+func TestGoogleAuthRejectsUnverifiedEmail(t *testing.T) {
+	verifier := &fakeGoogleVerifier{identity: service.GoogleIdentity{Subject: "google-sub-123", Email: "googleuser@gmail.com"}}
+	svc := service.NewAuthServiceWithGoogleVerifier(&fakeRepository{}, "test-secret", verifier)
+
+	_, err := svc.GoogleAuth(context.Background(), "signed-google-id-token")
+	if !errors.Is(err, service.ErrGoogleAuthFailed) {
+		t.Fatalf("expected ErrGoogleAuthFailed, got %v", err)
+	}
+}
+
+func TestGoogleAuthRejectsExistingEmailWithoutExplicitLink(t *testing.T) {
+	user := &model.User{ID: uuid.New(), Email: "googleuser@gmail.com", Status: "active"}
+	verifier := &fakeGoogleVerifier{identity: service.GoogleIdentity{Subject: "different-google-sub", Email: user.Email, EmailVerified: true}}
+	svc := service.NewAuthServiceWithGoogleVerifier(&fakeRepository{user: user}, "test-secret", verifier)
+
+	_, err := svc.GoogleAuth(context.Background(), "signed-google-id-token")
+	if !errors.Is(err, service.ErrGoogleAccountLinkRequired) {
+		t.Fatalf("expected ErrGoogleAccountLinkRequired, got %v", err)
 	}
 }
 
 func TestCompleteGoogleRegistrationSuccess(t *testing.T) {
 	repo := &fakeRepository{}
-	svc := service.NewAuthService(repo, "test-secret")
+	verifier := &fakeGoogleVerifier{identity: service.GoogleIdentity{Subject: "google-sub-123", Email: "googleuser@gmail.com", FullName: "Google User", EmailVerified: true}}
+	svc := service.NewAuthServiceWithGoogleVerifier(repo, "test-secret", verifier)
 
-	resAuth, err := svc.GoogleAuth(context.Background(), "google-sub-123", "googleuser@gmail.com", "Google User")
+	resAuth, err := svc.GoogleAuth(context.Background(), "signed-google-id-token")
 	if err != nil {
 		t.Fatal(err)
 	}

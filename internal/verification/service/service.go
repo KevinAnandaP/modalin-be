@@ -12,6 +12,7 @@ import (
 
 	"modalin-be/internal/model"
 	"modalin-be/internal/verification/repository"
+	auditlog "modalin-be/pkg/audit"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -635,5 +636,5 @@ func audit(ctx context.Context, repo repository.Repository, userID *uuid.UUID, a
 		s := string(b)
 		return &s
 	}
-	return repo.CreateAuditLog(ctx, &model.AuditLog{UserID: userID, Action: action, EntityType: entity, EntityID: id, OldValue: encode(oldValue), NewValue: encode(newValue), CreatedAt: time.Now().UTC()})
+	return repo.CreateAuditLog(ctx, auditlog.New(ctx, userID, action, entity, id, encode(oldValue), encode(newValue)))
 }

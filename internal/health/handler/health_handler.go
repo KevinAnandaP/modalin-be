@@ -13,6 +13,17 @@ func NewHealthHandler() *HealthHandler {
 }
 
 func (h *HealthHandler) CheckHealth(c *fiber.Ctx) error {
+	return h.Ready(c)
+}
+
+// Live proves that the API process can handle requests. It deliberately does
+// not query dependencies, so an orchestrator will restart only a stuck process.
+func (h *HealthHandler) Live(c *fiber.Ctx) error {
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{"status": "up"})
+}
+
+// Ready proves the API can serve traffic that requires PostgreSQL.
+func (h *HealthHandler) Ready(c *fiber.Ctx) error {
 	dbStatus := "connected"
 
 	if database.DB == nil {

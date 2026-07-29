@@ -36,16 +36,29 @@ func MarkOverdueRepaymentSchedules(ctx context.Context, db *gorm.DB, now time.Ti
 	return result.RowsAffected, result.Error
 }
 
-func StartRepaymentOverdueScheduler(db *gorm.DB) {
+func StartRepaymentOverdueScheduler(ctx context.Context, db *gorm.DB) {
 	go func() {
 		for {
 			now := time.Now()
-			if _, err := MarkOverdueRepaymentSchedules(context.Background(), db, now); err != nil {
+			if _, err := MarkOverdueRepaymentSchedules(ctx, db, now); err != nil && ctx.Err() == nil {
 				log.Printf("repayment overdue job failed: %v", err)
 			}
-			time.Sleep(durationUntilNextWIBRun(now))
+			if !waitForNextRun(ctx, durationUntilNextWIBRun(now)) {
+				return
+			}
 		}
 	}()
+}
+
+func waitForNextRun(ctx context.Context, duration time.Duration) bool {
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
 }
 
 func durationUntilNextWIBRun(now time.Time) time.Duration {

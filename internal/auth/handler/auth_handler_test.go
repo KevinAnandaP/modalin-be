@@ -13,6 +13,7 @@ func TestAuthHandlerRejectsIncompleteCredentialsBeforeServiceCall(t *testing.T) 
 	h := &AuthHandler{}
 	app.Post("/register", h.Register)
 	app.Post("/login", h.Login)
+	app.Post("/google", h.GoogleAuth)
 	register, err := app.Test(httptest.NewRequest("POST", "/register", strings.NewReader(`{"email":"a@example.com"}`)))
 	if err != nil {
 		t.Fatal(err)
@@ -26,5 +27,12 @@ func TestAuthHandlerRejectsIncompleteCredentialsBeforeServiceCall(t *testing.T) 
 	}
 	if login.StatusCode != fiber.StatusBadRequest {
 		t.Fatalf("login got %d", login.StatusCode)
+	}
+	google, err := app.Test(httptest.NewRequest("POST", "/google", strings.NewReader(`{"email":"a@example.com"}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if google.StatusCode != fiber.StatusBadRequest {
+		t.Fatalf("google got %d", google.StatusCode)
 	}
 }

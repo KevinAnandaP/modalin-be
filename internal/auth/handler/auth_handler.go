@@ -74,17 +74,18 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 
 func (h *AuthHandler) GoogleAuth(c *fiber.Ctx) error {
 	var req struct {
-		GoogleID string `json:"google_id"`
-		Email    string `json:"email"`
-		FullName string `json:"full_name"`
+		IDToken string `json:"id_token"`
 	}
-	if err := c.BodyParser(&req); err != nil || req.GoogleID == "" || req.Email == "" {
-		return c.Status(400).JSON(fiber.Map{"error": "google_id and email are required"})
+	if err := c.BodyParser(&req); err != nil || req.IDToken == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "id_token is required"})
 	}
-	res, err := h.service.GoogleAuth(c.Context(), req.GoogleID, req.Email, req.FullName)
+	res, err := h.service.GoogleAuth(c.Context(), req.IDToken)
 	if err != nil {
 		if errors.Is(err, service.ErrUserInactive) {
 			return c.Status(403).JSON(fiber.Map{"error": "account is not active"})
+		}
+		if errors.Is(err, service.ErrGoogleAccountLinkRequired) {
+			return c.Status(409).JSON(fiber.Map{"error": err.Error()})
 		}
 		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}

@@ -1,5 +1,5 @@
 # Stage 1: Build the Go binary
-FROM golang:1.22-alpine AS builder
+FROM golang:1.26.5-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache git
@@ -15,6 +15,7 @@ COPY . .
 
 # Build the binary statically (CGO_ENABLED=0) and strip debug symbols (-ldflags="-s -w")
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /app/main cmd/api/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /app/migrate cmd/migrate/main.go
 
 # Stage 2: Run the binary in a minimal image
 FROM alpine:latest
@@ -26,6 +27,7 @@ WORKDIR /app
 
 # Copy binary from builder
 COPY --from=builder /app/main .
+COPY --from=builder /app/migrate .
 
 # Copy config folder (excluding files listed in .dockerignore)
 COPY configs/ ./configs/
