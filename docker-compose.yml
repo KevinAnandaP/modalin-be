@@ -5,7 +5,7 @@ services:
     restart: always
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ajakelalen
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in your environment or configs/.env}
       POSTGRES_DB: modalin-db
     ports:
       - "5433:5432"
@@ -30,7 +30,7 @@ services:
       DB_HOST: db
       DB_PORT: 5432
       DB_USER: postgres
-      DB_PASSWORD: ajakelalen
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in your environment or configs/.env}
       DB_NAME: modalin-db
       DB_SSLMODE: disable
       DB_TIMEZONE: Asia/Jakarta

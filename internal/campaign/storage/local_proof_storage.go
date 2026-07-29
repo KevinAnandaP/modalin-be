@@ -24,6 +24,13 @@ func NewLocalProofStorage(directory, urlPrefix string) *LocalProofStorage {
 }
 
 func (s *LocalProofStorage) Store(fileHeader *multipart.FileHeader) (string, error) {
+	return s.StoreCategory("fund-usage-proofs", fileHeader)
+}
+
+func (s *LocalProofStorage) StoreCategory(category string, fileHeader *multipart.FileHeader) (string, error) {
+	if !validCategory(category) {
+		return "", errors.New("invalid proof category")
+	}
 	if fileHeader == nil || fileHeader.Size <= 0 || fileHeader.Size > maxProofFileSize {
 		return "", ErrUnsupportedProofFile
 	}
@@ -44,7 +51,7 @@ func (s *LocalProofStorage) Store(fileHeader *multipart.FileHeader) (string, err
 	if _, err := source.Seek(0, io.SeekStart); err != nil {
 		return "", err
 	}
-	targetDir := filepath.Join(s.directory, "fund-usage-proofs")
+	targetDir := filepath.Join(s.directory, category)
 	if err := os.MkdirAll(targetDir, 0750); err != nil {
 		return "", err
 	}
@@ -64,33 +71,45 @@ func (s *LocalProofStorage) Store(fileHeader *multipart.FileHeader) (string, err
 		_ = os.Remove(targetPath)
 		return "", ErrUnsupportedProofFile
 	}
-	return s.urlPrefix + "/fund-usage-proofs/" + filename, nil
+	return s.urlPrefix + "/" + category + "/" + filename, nil
 }
 
 func (s *LocalProofStorage) Delete(publicURL string) error {
-	prefix := s.urlPrefix + "/fund-usage-proofs/"
-	if !strings.HasPrefix(publicURL, prefix) {
+	category, filename, ok := s.parsePublicURL(publicURL)
+	if !ok {
 		return nil
 	}
-	filename := strings.TrimPrefix(publicURL, prefix)
-	if filename == "" || filepath.Base(filename) != filename {
-		return errors.New("invalid proof file URL")
-	}
-	if err := os.Remove(filepath.Join(s.directory, "fund-usage-proofs", filename)); err != nil && !os.IsNotExist(err) {
+	if err := os.Remove(filepath.Join(s.directory, category, filename)); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	return nil
 }
 func (s *LocalProofStorage) Read(publicURL string) ([]byte, error) {
-	prefix := s.urlPrefix + "/fund-usage-proofs/"
+	category, filename, ok := s.parsePublicURL(publicURL)
+	if !ok {
+		return nil, errors.New("invalid proof file URL")
+	}
+	return os.ReadFile(filepath.Join(s.directory, category, filename))
+}
+
+func (s *LocalProofStorage) parsePublicURL(publicURL string) (string, string, bool) {
+	prefix := s.urlPrefix + "/"
 	if !strings.HasPrefix(publicURL, prefix) {
-		return nil, errors.New("invalid proof file URL")
+		return "", "", false
 	}
-	filename := strings.TrimPrefix(publicURL, prefix)
-	if filename == "" || filepath.Base(filename) != filename {
-		return nil, errors.New("invalid proof file URL")
+	parts := strings.Split(strings.TrimPrefix(publicURL, prefix), "/")
+	if len(parts) != 2 || !validCategory(parts[0]) || parts[1] == "" || filepath.Base(parts[1]) != parts[1] {
+		return "", "", false
 	}
-	return os.ReadFile(filepath.Join(s.directory, "fund-usage-proofs", filename))
+	return parts[0], parts[1], true
+}
+func validCategory(category string) bool {
+	switch category {
+	case "fund-usage-proofs", "monthly-progress-proofs", "revenue-report-proofs", "repayment-proofs", "disbursement-proofs":
+		return true
+	default:
+		return false
+	}
 }
 
 func extensionForContentType(contentType string) string {

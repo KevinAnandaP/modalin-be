@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"mime/multipart"
@@ -24,7 +25,7 @@ type proofAccessRepo struct {
 }
 
 func (r *proofAccessRepo) GetBusinessByUserID(_ context.Context, id uuid.UUID) (*model.Business, error) {
-	if r.business.UserID == id {
+	if r.business != nil && r.business.UserID == id {
 		return r.business, nil
 	}
 	return nil, errors.New("not found")
@@ -50,6 +51,21 @@ type memoryProofStorage struct{}
 func (memoryProofStorage) Store(*multipart.FileHeader) (string, error) { return "", nil }
 func (memoryProofStorage) Delete(string) error                         { return nil }
 func (memoryProofStorage) Read(string) ([]byte, error)                 { return []byte("proof"), nil }
+
+type trackingProofStorage struct{ stored, deleted []string }
+
+func (s *trackingProofStorage) Store(*multipart.FileHeader) (string, error) {
+	url := "/uploads/proof-" + uuid.NewString() + ".png"
+	s.stored = append(s.stored, url)
+	return url, nil
+}
+func (s *trackingProofStorage) Delete(url string) error {
+	s.deleted = append(s.deleted, url)
+	return nil
+}
+func (s *trackingProofStorage) Read(string) ([]byte, error) {
+	return nil, errors.New("not implemented")
+}
 
 type catalogRepo struct {
 	repository.Repository
@@ -107,5 +123,39 @@ func TestProofDownloadEnforcesCampaignAccess(t *testing.T) {
 	}
 	if status := call(uuid.New(), []string{"admin"}); status != fiber.StatusOK {
 		t.Fatalf("admin expected 200, got %d", status)
+	}
+}
+
+func TestRevenueReportUploadIsCleanedUpWhenServiceRejectsIt(t *testing.T) {
+	storage := &trackingProofStorage{}
+	app := fiber.New()
+	app.Use(func(c *fiber.Ctx) error { c.Locals("user_id", uuid.New()); return c.Next() })
+	app.Post("/campaigns/:id/revenue-reports", NewCampaignHandler(service.NewCampaignService(&proofAccessRepo{}), storage).CreateRevenueReport)
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	_ = writer.WriteField("period_month", "7")
+	_ = writer.WriteField("period_year", "2026")
+	_ = writer.WriteField("gross_revenue", "100000")
+	_ = writer.WriteField("transaction_count", "1")
+	_ = writer.WriteField("business_status", "running")
+	file, err := writer.CreateFormFile("file", "receipt.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = file.Write([]byte("proof"))
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest("POST", "/campaigns/"+uuid.NewString()+"/revenue-reports", body)
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	response, err := app.Test(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode < 400 {
+		t.Fatalf("expected rejection, got %d", response.StatusCode)
+	}
+	if len(storage.stored) != 1 || len(storage.deleted) != 1 || storage.stored[0] != storage.deleted[0] {
+		t.Fatalf("uploaded report proof was not cleaned up: stored=%v deleted=%v", storage.stored, storage.deleted)
 	}
 }

@@ -36,7 +36,7 @@ func LoadConfig() {
 		DBUser:     getEnv("DB_USER", "postgres"),
 		DBPassword: getEnv("DB_PASSWORD", ""),
 		DBName:     getEnv("DB_NAME", "modalin-db"),
-		DBSSLMode:  getEnv("DB_SSLMODE", "disable"),
+		DBSSLMode:  getEnv("DB_SSLMODE", "require"),
 		DBTimeZone: getEnv("DB_TIMEZONE", "Asia/Jakarta"),
 		JWTSecret:  getEnv("JWT_SECRET", ""),
 		UploadDir:  getEnv("UPLOAD_DIR", "uploads"),

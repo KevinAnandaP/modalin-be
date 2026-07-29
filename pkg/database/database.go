@@ -67,6 +67,8 @@ func ConnectDB() {
 		&model.Funding{},
 		&model.Disbursement{},
 		&model.FundUsageProof{},
+		&model.MonthlyProgressReport{},
+		&model.MonthlyProgressReportProof{},
 		&model.RevenueReport{},
 		&model.RevenueReportProof{},
 		&model.RepaymentSchedule{},
@@ -96,6 +98,9 @@ func ConnectDB() {
 	}
 	if err := db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_businesses_one_active_per_user ON businesses (user_id) WHERE status = 'active'").Error; err != nil {
 		log.Fatalf("Failed to create active business uniqueness index: %v", err)
+	}
+	if err := runApplicationMigrations(db); err != nil {
+		log.Fatalf("Failed to run application migrations: %v", err)
 	}
 	log.Println("Database migrations completed successfully!")
 
