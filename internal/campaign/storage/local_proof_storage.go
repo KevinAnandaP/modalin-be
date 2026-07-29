@@ -15,7 +15,7 @@ import (
 
 const maxProofFileSize = 5 * 1024 * 1024
 
-var ErrUnsupportedProofFile = errors.New("proof must be a PNG, JPEG, or PDF file up to 5 MB")
+var ErrUnsupportedProofFile = errors.New("proof must be a PNG, JPEG, WebP, or PDF file up to 5 MB")
 
 type LocalProofStorage struct{ directory, urlPrefix string }
 
@@ -105,7 +105,7 @@ func (s *LocalProofStorage) parsePublicURL(publicURL string) (string, string, bo
 }
 func validCategory(category string) bool {
 	switch category {
-	case "fund-usage-proofs", "monthly-progress-proofs", "revenue-report-proofs", "repayment-proofs", "disbursement-proofs":
+	case "fund-usage-proofs", "monthly-progress-proofs", "revenue-report-proofs", "repayment-proofs", "disbursement-proofs", "verification-reports":
 		return true
 	default:
 		return false
@@ -118,6 +118,8 @@ func extensionForContentType(contentType string) string {
 		return ".png"
 	case "image/jpeg":
 		return ".jpg"
+	case "image/webp":
+		return ".webp"
 	case "application/pdf":
 		return ".pdf"
 	default:

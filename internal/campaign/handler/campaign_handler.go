@@ -203,7 +203,12 @@ func (h *CampaignHandler) DeleteMilestone(c *fiber.Ctx) error {
 func (h *CampaignHandler) Catalog(c *fiber.Ctx) error {
 	min, _ := strconv.ParseInt(c.Query("min_amount"), 10, 64)
 	max, _ := strconv.ParseInt(c.Query("max_amount"), 10, 64)
-	v, err := h.service.GetCatalog(c.Context(), repository.CatalogFilter{Query: c.Query("search"), Category: c.Query("category"), RiskLevel: c.Query("risk_level"), MinAmount: min, MaxAmount: max})
+	minRisk, _ := strconv.ParseInt(c.Query("min_risk_score"), 10, 64)
+	maxRisk, _ := strconv.ParseInt(c.Query("max_risk_score"), 10, 64)
+	if minRisk < 0 || minRisk > 100 || maxRisk < 0 || maxRisk > 100 || (minRisk > 0 && maxRisk > 0 && minRisk > maxRisk) {
+		return bad(c, "risk score must be between 0 and 100")
+	}
+	v, err := h.service.GetCatalog(c.Context(), repository.CatalogFilter{Query: c.Query("search"), Category: c.Query("category"), RiskLevel: c.Query("risk_level"), MinAmount: min, MaxAmount: max, MinRiskScore: minRisk, MaxRiskScore: maxRisk})
 	return h.result(c, v, err, 200)
 }
 func (h *CampaignHandler) Review(c *fiber.Ctx) error {
@@ -625,7 +630,7 @@ func (h *CampaignHandler) result(c *fiber.Ctx, v any, err error, status int) err
 	switch {
 	case errors.Is(err, service.ErrCampaignNotFound), errors.Is(err, service.ErrBudgetItemNotFound), errors.Is(err, service.ErrMilestoneNotFound), errors.Is(err, service.ErrDisbursementNotFound), errors.Is(err, service.ErrFundUsageProofNotFound), errors.Is(err, service.ErrRevenueReportNotFound), errors.Is(err, service.ErrMonthlyProgressReportNotFound), errors.Is(err, service.ErrRepaymentScheduleNotFound), errors.Is(err, service.ErrRepaymentNotFound), errors.Is(err, service.ErrLenderReturnDistributionNotFound):
 		return c.Status(404).JSON(fiber.Map{"error": err.Error()})
-	case errors.Is(err, service.ErrCampaignLocked), errors.Is(err, service.ErrInvalidStatusTransition), errors.Is(err, service.ErrFundingUnavailable), errors.Is(err, service.ErrProofReviewUnavailable), errors.Is(err, service.ErrRevenueReportUnavailable), errors.Is(err, service.ErrMonthlyProgressReportUnavailable), errors.Is(err, service.ErrRepaymentUnavailable), errors.Is(err, service.ErrDistributionUnavailable), errors.Is(err, service.ErrDisbursementTransferUnavailable):
+	case errors.Is(err, service.ErrCampaignLocked), errors.Is(err, service.ErrInvalidStatusTransition), errors.Is(err, service.ErrFieldVerificationRequired), errors.Is(err, service.ErrFundingUnavailable), errors.Is(err, service.ErrProofReviewUnavailable), errors.Is(err, service.ErrRevenueReportUnavailable), errors.Is(err, service.ErrMonthlyProgressReportUnavailable), errors.Is(err, service.ErrRepaymentUnavailable), errors.Is(err, service.ErrDistributionUnavailable), errors.Is(err, service.ErrDisbursementTransferUnavailable):
 		return c.Status(409).JSON(fiber.Map{"error": err.Error()})
 	case errors.Is(err, service.ErrProofAccessDenied):
 		return c.Status(403).JSON(fiber.Map{"error": err.Error()})

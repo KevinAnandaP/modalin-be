@@ -15,26 +15,27 @@ import (
 )
 
 type fakeCampaignRepo struct {
-	business          *model.Business
-	campaigns         map[uuid.UUID]*model.LoanCampaign
-	budgets           map[uuid.UUID][]model.CampaignBudgetItem
-	milestones        map[uuid.UUID][]model.CampaignMilestone
-	disbursements     map[uuid.UUID][]model.Disbursement
-	proofs            map[uuid.UUID]*model.FundUsageProof
-	revenueReports    map[uuid.UUID]*model.RevenueReport
-	revenueProofs     map[uuid.UUID][]model.RevenueReportProof
-	monthlyReports    map[uuid.UUID]*model.MonthlyProgressReport
-	monthlyProofs     map[uuid.UUID][]model.MonthlyProgressReportProof
-	schedules         map[uuid.UUID][]model.RepaymentSchedule
-	repayments        map[uuid.UUID]*model.Repayment
-	distributions     []model.LenderReturnDistribution
-	fundings          []model.Funding
-	audits            []model.AuditLog
-	transactions      int
-	lockedReads       int
-	proofLocks        int
-	disbursementLocks int
-	hasFunding        bool
+	business                     *model.Business
+	campaigns                    map[uuid.UUID]*model.LoanCampaign
+	budgets                      map[uuid.UUID][]model.CampaignBudgetItem
+	milestones                   map[uuid.UUID][]model.CampaignMilestone
+	disbursements                map[uuid.UUID][]model.Disbursement
+	proofs                       map[uuid.UUID]*model.FundUsageProof
+	revenueReports               map[uuid.UUID]*model.RevenueReport
+	revenueProofs                map[uuid.UUID][]model.RevenueReportProof
+	monthlyReports               map[uuid.UUID]*model.MonthlyProgressReport
+	monthlyProofs                map[uuid.UUID][]model.MonthlyProgressReportProof
+	schedules                    map[uuid.UUID][]model.RepaymentSchedule
+	repayments                   map[uuid.UUID]*model.Repayment
+	distributions                []model.LenderReturnDistribution
+	fundings                     []model.Funding
+	audits                       []model.AuditLog
+	transactions                 int
+	lockedReads                  int
+	proofLocks                   int
+	disbursementLocks            int
+	hasFunding                   bool
+	hasApprovedFieldVerification bool
 }
 
 func (r *fakeCampaignRepo) GetBusinessByUserID(_ context.Context, userID uuid.UUID) (*model.Business, error) {
@@ -87,6 +88,12 @@ func (r *fakeCampaignRepo) GetDisbursementForUpdate(ctx context.Context, id uuid
 func (r *fakeCampaignRepo) WithTransaction(_ context.Context, fn func(repository.Repository) error) error {
 	r.transactions++
 	return fn(r)
+}
+func (r *fakeCampaignRepo) HasApprovedFieldVerification(_ context.Context, _ uuid.UUID) (bool, error) {
+	return r.hasApprovedFieldVerification, nil
+}
+func (r *fakeCampaignRepo) IsAssignedVerifier(_ context.Context, _ uuid.UUID, _ uuid.UUID) (bool, error) {
+	return false, nil
 }
 func (r *fakeCampaignRepo) GetCampaignForBusiness(_ context.Context, id, businessID uuid.UUID) (*model.LoanCampaign, error) {
 	c, err := r.GetCampaignByID(context.Background(), id)

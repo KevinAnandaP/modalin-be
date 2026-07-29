@@ -220,18 +220,22 @@ func (frp *FinancialRecordProof) BeforeCreate(tx *gorm.DB) (err error) {
 
 // 8. VerificationRequest
 type VerificationRequest struct {
-	ID          uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
-	BusinessID  uuid.UUID      `gorm:"type:uuid;index;not null"`
-	RequestedBy uuid.UUID      `gorm:"type:uuid;index;not null"`
-	Status      string         `gorm:"type:varchar(50);default:'pending';not null"` // pending, assigned, reviewed, approved, rejected
-	AdminNote   *string        `gorm:"type:text"`
-	CreatedAt   time.Time      `gorm:"not null"`
-	DeletedAt   gorm.DeletedAt `gorm:"index"`
+	ID                 uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	CampaignID         *uuid.UUID     `gorm:"type:uuid;index"`
+	BusinessID         uuid.UUID      `gorm:"type:uuid;index;not null"`
+	RequestedBy        uuid.UUID      `gorm:"type:uuid;index;not null"`
+	AssignedVerifierID *uuid.UUID     `gorm:"type:uuid;index"`
+	Status             string         `gorm:"type:varchar(50);default:'pending';not null"` // pending, assigned, reviewed, approved, rejected
+	AdminNote          *string        `gorm:"type:text"`
+	CreatedAt          time.Time      `gorm:"not null"`
+	DeletedAt          gorm.DeletedAt `gorm:"index"`
 
 	// Relations
-	Business  Business             `gorm:"foreignKey:BusinessID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
-	Requester User                 `gorm:"foreignKey:RequestedBy;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
-	Reports   []VerificationReport `gorm:"foreignKey:VerificationRequestID"`
+	Business         Business             `gorm:"foreignKey:BusinessID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
+	Campaign         LoanCampaign         `gorm:"foreignKey:CampaignID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
+	Requester        User                 `gorm:"foreignKey:RequestedBy;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
+	AssignedVerifier *User                `gorm:"foreignKey:AssignedVerifierID;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;"`
+	Reports          []VerificationReport `gorm:"foreignKey:VerificationRequestID"`
 }
 
 func (VerificationRequest) TableName() string {
@@ -332,6 +336,19 @@ type LoanCampaign struct {
 	Schedules             []RepaymentSchedule             `gorm:"foreignKey:CampaignID"`
 	Repayments            []Repayment                     `gorm:"foreignKey:CampaignID"`
 	RestructuringRequests []RepaymentRestructuringRequest `gorm:"foreignKey:CampaignID"`
+	RiskAssessments       []RiskAssessment                `gorm:"foreignKey:CampaignID" json:"-"`
+	LatestRiskAssessment  *RiskAssessment                 `gorm:"-" json:"risk_assessment,omitempty"`
+	VerificationSummary   *VerificationSummary            `gorm:"-" json:"verification_summary,omitempty"`
+}
+
+// VerificationSummary is intentionally public-safe: it excludes verifier notes and proof URLs.
+type VerificationSummary struct {
+	Status           string    `json:"status"`
+	ReportedAt       time.Time `json:"reported_at"`
+	IsBusinessExists bool      `json:"is_business_exists"`
+	IsBusinessActive bool      `json:"is_business_active"`
+	LocationMatch    bool      `json:"location_match"`
+	Recommendation   string    `json:"recommendation"`
 }
 
 func (LoanCampaign) TableName() string {
@@ -696,18 +713,23 @@ func (lrd *LenderReturnDistribution) BeforeCreate(tx *gorm.DB) (err error) {
 
 // 22. RiskAssessment
 type RiskAssessment struct {
-	ID                uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
-	CampaignID        uuid.UUID      `gorm:"type:uuid;index;not null"`
-	BusinessID        uuid.UUID      `gorm:"type:uuid;index;not null"`
-	FinancialScore    int            `gorm:"type:int;not null"`
-	VerificationScore int            `gorm:"type:int;not null"`
-	RepaymentScore    int            `gorm:"type:int;not null"`
-	CommunityScore    int            `gorm:"type:int;not null"`
-	FinalScore        int            `gorm:"type:int;not null"`
-	RiskLevel         string         `gorm:"type:varchar(50);not null"` // low, medium, high
-	Note              *string        `gorm:"type:text"`
-	CreatedAt         time.Time      `gorm:"not null"`
-	DeletedAt         gorm.DeletedAt `gorm:"index"`
+	ID                   uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	CampaignID           uuid.UUID      `gorm:"type:uuid;index;not null"`
+	BusinessID           uuid.UUID      `gorm:"type:uuid;index;not null"`
+	FinancialScore       int            `gorm:"type:int;not null"`
+	VerificationScore    int            `gorm:"type:int;not null"`
+	RepaymentScore       int            `gorm:"type:int;not null"`
+	CommunityScore       int            `gorm:"type:int;not null"`
+	FinalScore           int            `gorm:"type:int;not null"`
+	RiskLevel            string         `gorm:"type:varchar(50);not null"` // low, medium, high
+	RiskFormulaVersion   string         `gorm:"type:varchar(32);default:'v1';not null"`
+	SourceFingerprint    string         `gorm:"type:char(64);index"`
+	DataLimited          bool           `gorm:"type:boolean;default:false;not null"`
+	MissingComponentsRaw string         `gorm:"column:missing_components;type:text;default:'';not null" json:"-"`
+	MissingComponents    []string       `gorm:"-" json:"missing_components"`
+	Note                 *string        `gorm:"type:text"`
+	CreatedAt            time.Time      `gorm:"not null"`
+	DeletedAt            gorm.DeletedAt `gorm:"index"`
 
 	// Relations
 	Campaign LoanCampaign `gorm:"foreignKey:CampaignID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
