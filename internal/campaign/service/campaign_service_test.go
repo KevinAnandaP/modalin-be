@@ -202,6 +202,15 @@ func (r *fakeCampaignRepo) CreateFunding(_ context.Context, funding *model.Fundi
 	r.fundings = append(r.fundings, *funding)
 	return nil
 }
+func (r *fakeCampaignRepo) UpdateFunding(_ context.Context, funding *model.Funding) error {
+	for i := range r.fundings {
+		if r.fundings[i].ID == funding.ID {
+			r.fundings[i] = *funding
+			return nil
+		}
+	}
+	return nil
+}
 func (r *fakeCampaignRepo) CreateDisbursement(_ context.Context, d *model.Disbursement) error {
 	d.ID = uuid.New()
 	r.disbursements[d.CampaignID] = append(r.disbursements[d.CampaignID], *d)

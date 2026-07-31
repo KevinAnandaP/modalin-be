@@ -17,13 +17,16 @@ type User struct {
 	City            string         `gorm:"type:varchar(100);not null"`
 	Address         string         `gorm:"type:text;not null"`
 	Status          string         `gorm:"type:varchar(50);default:'active';not null"` // active, suspended, blocked
-	TokenVersion    uint64         `gorm:"type:bigint;not null;default:1" json:"-"`
-	GoogleID        *string        `gorm:"type:varchar(255);uniqueIndex"`
-	TermsAcceptedAt *time.Time     `gorm:"type:timestamp"`
-	TermsVersion    string         `gorm:"type:varchar(50)"`
-	CreatedAt       time.Time      `gorm:"not null"`
-	UpdatedAt       time.Time      `gorm:"not null"`
-	DeletedAt       gorm.DeletedAt `gorm:"index"`
+	TokenVersion          uint64         `gorm:"type:bigint;not null;default:1" json:"-"`
+	GoogleID              *string        `gorm:"type:varchar(255);uniqueIndex"`
+	TermsAcceptedAt       *time.Time     `gorm:"type:timestamp"`
+	TermsVersion          string         `gorm:"type:varchar(50)"`
+	BankCode              *string        `gorm:"type:varchar(50)"`
+	BankAccountNumber     *string        `gorm:"type:varchar(100)"`
+	BankAccountHolderName *string        `gorm:"type:varchar(255)"`
+	CreatedAt             time.Time      `gorm:"not null"`
+	UpdatedAt             time.Time      `gorm:"not null"`
+	DeletedAt             gorm.DeletedAt `gorm:"index"`
 
 	// Relations
 	Roles    []UserRole `gorm:"foreignKey:UserID"`
@@ -424,9 +427,14 @@ type Funding struct {
 	CampaignID   uuid.UUID      `gorm:"type:uuid;index;not null"`
 	LenderUserID uuid.UUID      `gorm:"type:uuid;index;not null"`
 	Amount       int64          `gorm:"type:bigint;not null"`
-	Status       string         `gorm:"type:varchar(50);default:'pledged';not null"` // pledged, paid, cancelled, refunded
-	FundedAt     time.Time      `gorm:"not null"`
-	DeletedAt    gorm.DeletedAt `gorm:"index"`
+	Status              string         `gorm:"type:varchar(50);default:'pledged';not null"` // pledged, paid, cancelled, refunded
+	FundedAt            time.Time      `gorm:"not null"`
+	XenditInvoiceID     *string        `gorm:"type:varchar(255);index"`
+	XenditInvoiceURL    *string        `gorm:"type:text"`
+	XenditPaymentStatus *string        `gorm:"type:varchar(50)"`
+	XenditPaymentMethod *string        `gorm:"type:varchar(50)"`
+	XenditPaidAt        *time.Time     `gorm:"type:timestamp"`
+	DeletedAt           gorm.DeletedAt `gorm:"index"`
 
 	// Relations
 	Campaign LoanCampaign `gorm:"foreignKey:CampaignID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
@@ -457,9 +465,14 @@ type Disbursement struct {
 	ReleasedAt        *time.Time     `gorm:"type:timestamp"`
 	TransferReference *string        `gorm:"type:varchar(255)"`
 	TransferProofURL  *string        `gorm:"type:text"`
-	ReleasedBy        *uuid.UUID     `gorm:"type:uuid;index"`
-	CreatedAt         time.Time      `gorm:"not null"`
-	DeletedAt         gorm.DeletedAt `gorm:"index"`
+	ReleasedBy               *uuid.UUID     `gorm:"type:uuid;index"`
+	BankCode                 *string        `gorm:"type:varchar(50)"`
+	BankAccountNumber        *string        `gorm:"type:varchar(100)"`
+	BankAccountHolderName    *string        `gorm:"type:varchar(255)"`
+	XenditDisbursementID     *string        `gorm:"type:varchar(255);index"`
+	XenditDisbursementStatus *string        `gorm:"type:varchar(50)"`
+	CreatedAt                time.Time      `gorm:"not null"`
+	DeletedAt                gorm.DeletedAt `gorm:"index"`
 
 	// Relations
 	Campaign  LoanCampaign      `gorm:"foreignKey:CampaignID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
@@ -660,9 +673,14 @@ type Repayment struct {
 	PrincipalPaid   int64          `gorm:"type:bigint;not null"`
 	BenefitPaid     int64          `gorm:"type:bigint;not null"`
 	PaymentProofURL *string        `gorm:"type:text"`
-	Status          string         `gorm:"type:varchar(50);default:'pending';not null"` // pending, verified, rejected
-	PaidAt          time.Time      `gorm:"not null"`
-	DeletedAt       gorm.DeletedAt `gorm:"index"`
+	Status              string         `gorm:"type:varchar(50);default:'pending';not null"` // pending, verified, rejected
+	PaidAt              time.Time      `gorm:"not null"`
+	XenditInvoiceID     *string        `gorm:"type:varchar(255);index"`
+	XenditInvoiceURL    *string        `gorm:"type:text"`
+	XenditPaymentStatus *string        `gorm:"type:varchar(50)"`
+	XenditPaymentMethod *string        `gorm:"type:varchar(50)"`
+	XenditPaidAt        *time.Time     `gorm:"type:timestamp"`
+	DeletedAt           gorm.DeletedAt `gorm:"index"`
 
 	// Relations
 	Campaign LoanCampaign      `gorm:"foreignKey:CampaignID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
@@ -682,17 +700,22 @@ func (r *Repayment) BeforeCreate(tx *gorm.DB) (err error) {
 
 // 21. LenderReturnDistribution
 type LenderReturnDistribution struct {
-	ID                uuid.UUID  `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
-	RepaymentID       uuid.UUID  `gorm:"type:uuid;index;not null"`
-	FundingID         uuid.UUID  `gorm:"type:uuid;index;not null"`
-	LenderUserID      uuid.UUID  `gorm:"type:uuid;index;not null"`
-	PrincipalAmount   int64      `gorm:"type:bigint;not null"`
-	BenefitAmount     int64      `gorm:"type:bigint;not null"`
-	Status            string     `gorm:"type:varchar(50);default:'pending';not null"` // pending, distributed
-	CreatedAt         time.Time  `gorm:"not null"`
-	DistributedAt     *time.Time `gorm:"type:timestamp"`
-	TransferReference *string    `gorm:"type:varchar(255)"`
-	DistributedBy     *uuid.UUID `gorm:"type:uuid;index"`
+	ID                       uuid.UUID  `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	RepaymentID              uuid.UUID  `gorm:"type:uuid;index;not null"`
+	FundingID                uuid.UUID  `gorm:"type:uuid;index;not null"`
+	LenderUserID             uuid.UUID  `gorm:"type:uuid;index;not null"`
+	PrincipalAmount          int64      `gorm:"type:bigint;not null"`
+	BenefitAmount            int64      `gorm:"type:bigint;not null"`
+	Status                   string     `gorm:"type:varchar(50);default:'pending';not null"` // pending, distributed
+	CreatedAt                time.Time  `gorm:"not null"`
+	DistributedAt            *time.Time `gorm:"type:timestamp"`
+	TransferReference        *string    `gorm:"type:varchar(255)"`
+	DistributedBy            *uuid.UUID `gorm:"type:uuid;index"`
+	BankCode                 *string    `gorm:"type:varchar(50)"`
+	BankAccountNumber        *string    `gorm:"type:varchar(100)"`
+	BankAccountHolderName    *string    `gorm:"type:varchar(255)"`
+	XenditDisbursementID     *string    `gorm:"type:varchar(255);index"`
+	XenditDisbursementStatus *string    `gorm:"type:varchar(50)"`
 
 	// Relations
 	Repayment   Repayment `gorm:"foreignKey:RepaymentID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`

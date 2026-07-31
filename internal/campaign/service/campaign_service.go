@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"sort"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"modalin-be/internal/campaign/repository"
 	"modalin-be/internal/model"
 	auditlog "modalin-be/pkg/audit"
+	"modalin-be/pkg/xendit"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -134,6 +136,7 @@ type MonthlyProgressReportInput struct {
 type CampaignService struct {
 	repo          repository.Repository
 	riskRefresher func(context.Context, uuid.UUID) error
+	xenditClient  *xendit.Client
 }
 
 func NewCampaignService(repo repository.Repository, riskRefreshers ...func(context.Context, uuid.UUID) error) *CampaignService {
@@ -142,6 +145,10 @@ func NewCampaignService(repo repository.Repository, riskRefreshers ...func(conte
 		s.riskRefresher = riskRefreshers[0]
 	}
 	return s
+}
+
+func (s *CampaignService) SetXenditClient(client *xendit.Client) {
+	s.xenditClient = client
 }
 
 func (s *CampaignService) CreateCampaign(ctx context.Context, userID uuid.UUID, in CampaignInput) (*model.LoanCampaign, error) {
@@ -709,7 +716,22 @@ func (s *CampaignService) CreateRepayment(ctx context.Context, userID, campaignI
 		if err := repo.CreateRepayment(ctx, repayment); err != nil {
 			return err
 		}
-		return audit(ctx, repo, &userID, "repayment.submitted", "repayment", repayment.ID, nil, map[string]any{"schedule_id": schedule.ID, "paid_amount": repayment.PaidAmount})
+
+		if s.xenditClient != nil && s.xenditClient.SecretKey != "" {
+			inv, err := s.xenditClient.CreateInvoice(ctx, xendit.CreateInvoiceReq{
+				ExternalID:  fmt.Sprintf("REPAYMENT-%s", repayment.ID.String()),
+				Amount:      float64(repayment.PaidAmount),
+				Description: fmt.Sprintf("Pembayaran Cicilan Modalin (Schedule %s)", schedule.ID.String()),
+			})
+			if err == nil && inv != nil {
+				repayment.XenditInvoiceID = &inv.ID
+				repayment.XenditInvoiceURL = &inv.InvoiceURL
+				repayment.XenditPaymentStatus = &inv.Status
+				_ = repo.UpdateRepayment(ctx, repayment)
+			}
+		}
+
+		return audit(ctx, repo, &userID, "repayment.submitted", "repayment", repayment.ID, nil, map[string]any{"schedule_id": schedule.ID, "paid_amount": repayment.PaidAmount, "xendit_invoice_id": repayment.XenditInvoiceID})
 	})
 	if err != nil {
 		return nil, err
@@ -900,10 +922,34 @@ func (s *CampaignService) Pledge(ctx context.Context, lenderID, campaignID uuid.
 		}
 
 		now := time.Now().UTC()
-		funding = &model.Funding{CampaignID: c.ID, LenderUserID: lenderID, Amount: amount, Status: "paid", FundedAt: now}
+		initialStatus := "paid"
+		if s.xenditClient != nil && s.xenditClient.SecretKey != "" {
+			initialStatus = "pledged"
+		}
+
+		funding = &model.Funding{CampaignID: c.ID, LenderUserID: lenderID, Amount: amount, Status: initialStatus, FundedAt: now}
 		if err := repo.CreateFunding(ctx, funding); err != nil {
 			return err
 		}
+
+		if s.xenditClient != nil && s.xenditClient.SecretKey != "" {
+			inv, err := s.xenditClient.CreateInvoice(ctx, xendit.CreateInvoiceReq{
+				ExternalID:  fmt.Sprintf("FUNDING-%s", funding.ID.String()),
+				Amount:      float64(funding.Amount),
+				Description: fmt.Sprintf("Pendanaan Kampanye Modalin: %s", c.Title),
+			})
+			if err == nil && inv != nil {
+				funding.XenditInvoiceID = &inv.ID
+				funding.XenditInvoiceURL = &inv.InvoiceURL
+				funding.XenditPaymentStatus = &inv.Status
+				if err := repo.UpdateFunding(ctx, funding); err != nil {
+					return err
+				}
+			}
+			// Wait for Xendit webhook callback to update status to "paid" & increase FundedAmount
+			return audit(ctx, repo, &lenderID, "funding.created", "funding", funding.ID, nil, map[string]any{"campaign_id": c.ID, "amount": amount, "status": funding.Status, "xendit_invoice_id": funding.XenditInvoiceID})
+		}
+
 		if err := audit(ctx, repo, &lenderID, "funding.created", "funding", funding.ID, nil, map[string]any{"campaign_id": c.ID, "amount": amount, "status": funding.Status}); err != nil {
 			return err
 		}
