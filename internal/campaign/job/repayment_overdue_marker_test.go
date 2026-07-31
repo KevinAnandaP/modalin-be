@@ -1,6 +1,7 @@
 package job
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -19,5 +20,13 @@ func TestRepaymentScheduleIsOverdueInWIBAfterDueDate(t *testing.T) {
 	}
 	if RepaymentScheduleIsOverdue("paid", dueDate, time.Date(2026, 7, 21, 0, 5, 0, 0, jakarta)) {
 		t.Fatal("paid schedule must never become late")
+	}
+}
+
+func TestWaitForNextRunStopsWhenContextIsCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if waitForNextRun(ctx, time.Hour) {
+		t.Fatal("expected cancelled scheduler wait to stop")
 	}
 }

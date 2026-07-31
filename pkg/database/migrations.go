@@ -16,6 +16,15 @@ type migration struct {
 
 var applicationMigrations = []migration{
 	{
+		Version: "20260725_auth_token_version",
+		Up: []string{
+			"ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version bigint NOT NULL DEFAULT 1",
+		},
+		Down: []string{
+			"ALTER TABLE users DROP COLUMN IF EXISTS token_version",
+		},
+	},
+	{
 		Version: "20260724_risk_assessment_backfill",
 		Up: []string{
 			"ALTER TABLE risk_assessments ADD COLUMN IF NOT EXISTS data_limited boolean NOT NULL DEFAULT false",
@@ -47,6 +56,60 @@ var applicationMigrations = []migration{
 		Down: []string{
 			"DROP INDEX IF EXISTS idx_lender_return_distributions_one_per_repayment_funding",
 			"DROP INDEX IF EXISTS idx_repayments_one_active_per_schedule",
+		},
+	},
+	{
+		Version: "20260725_audit_log_contract",
+		Up: []string{
+			"ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS event_id uuid",
+			"ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS request_id varchar(100)",
+			"UPDATE audit_logs SET event_id = gen_random_uuid() WHERE event_id IS NULL",
+			"ALTER TABLE audit_logs ALTER COLUMN event_id SET NOT NULL",
+			"CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_logs_event_id ON audit_logs (event_id)",
+			"CREATE INDEX IF NOT EXISTS idx_audit_logs_request_id ON audit_logs (request_id)",
+			"CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_logs_request_event ON audit_logs (request_id, action, entity_type, entity_id) WHERE request_id IS NOT NULL",
+			"CREATE OR REPLACE FUNCTION modalin_prevent_audit_log_mutation() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'audit_logs is append-only'; END; $$ LANGUAGE plpgsql",
+			"DROP TRIGGER IF EXISTS trg_audit_logs_append_only ON audit_logs",
+			"CREATE TRIGGER trg_audit_logs_append_only BEFORE UPDATE OR DELETE ON audit_logs FOR EACH ROW EXECUTE FUNCTION modalin_prevent_audit_log_mutation()",
+		},
+		Down: []string{
+			"DROP TRIGGER IF EXISTS trg_audit_logs_append_only ON audit_logs",
+			"DROP FUNCTION IF EXISTS modalin_prevent_audit_log_mutation()",
+			"DROP INDEX IF EXISTS idx_audit_logs_request_id",
+			"DROP INDEX IF EXISTS idx_audit_logs_request_event",
+			"DROP INDEX IF EXISTS idx_audit_logs_event_id",
+			"ALTER TABLE audit_logs DROP COLUMN IF EXISTS request_id",
+			"ALTER TABLE audit_logs DROP COLUMN IF EXISTS event_id",
+		},
+	},
+	{
+		Version: "20260725_dispute_contract",
+		Up: []string{
+			"ALTER TABLE disputes ADD COLUMN IF NOT EXISTS resolution_note text",
+			"ALTER TABLE disputes ADD COLUMN IF NOT EXISTS resolved_at timestamptz",
+			"CREATE UNIQUE INDEX IF NOT EXISTS idx_disputes_one_active_per_reporter_target_type ON disputes (campaign_id, reported_by, COALESCE(target_user_id, '00000000-0000-0000-0000-000000000000'::uuid), type) WHERE deleted_at IS NULL AND status IN ('open', 'under_review')",
+		},
+		Down: []string{
+			"DROP INDEX IF EXISTS idx_disputes_one_active_per_reporter_target_type",
+			"ALTER TABLE disputes DROP COLUMN IF EXISTS resolved_at",
+			"ALTER TABLE disputes DROP COLUMN IF EXISTS resolution_note",
+		},
+	},
+	{
+		Version: "20260725_restructuring_contract",
+		Up: []string{
+			"ALTER TABLE repayment_restructuring_requests ADD COLUMN IF NOT EXISTS requested_by uuid",
+			"ALTER TABLE repayment_restructuring_requests ADD COLUMN IF NOT EXISTS previous_tenor_months int",
+			"ALTER TABLE repayment_restructuring_requests ADD COLUMN IF NOT EXISTS remaining_principal bigint",
+			"ALTER TABLE repayment_restructuring_requests ADD COLUMN IF NOT EXISTS remaining_margin bigint",
+			"CREATE UNIQUE INDEX IF NOT EXISTS idx_restructuring_one_pending_per_campaign ON repayment_restructuring_requests (campaign_id) WHERE deleted_at IS NULL AND status = 'pending'",
+		},
+		Down: []string{
+			"DROP INDEX IF EXISTS idx_restructuring_one_pending_per_campaign",
+			"ALTER TABLE repayment_restructuring_requests DROP COLUMN IF EXISTS remaining_margin",
+			"ALTER TABLE repayment_restructuring_requests DROP COLUMN IF EXISTS remaining_principal",
+			"ALTER TABLE repayment_restructuring_requests DROP COLUMN IF EXISTS previous_tenor_months",
+			"ALTER TABLE repayment_restructuring_requests DROP COLUMN IF EXISTS requested_by",
 		},
 	},
 }

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"modalin-be/internal/model"
+	"modalin-be/pkg/config"
 
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
@@ -68,12 +69,19 @@ func SeedData(db *gorm.DB) {
 		}
 	}
 
-	// 3. Seed Default Admin User
-	adminEmail := "admin@modalin.id"
+	// Admin bootstrap is opt-in. Production must never create a predictable
+	// administrator account on every application start.
+	if config.AppConfig == nil || config.AppConfig.BootstrapAdminEmail == "" {
+		log.Println("Admin bootstrap skipped; BOOTSTRAP_ADMIN_EMAIL is not configured")
+		return
+	}
+
+	// 3. Seed explicitly configured bootstrap admin user
+	adminEmail := config.AppConfig.BootstrapAdminEmail
 	var existingAdmin model.User
 	err := db.Where("email = ?", adminEmail).First(&existingAdmin).Error
 	if err == gorm.ErrRecordNotFound {
-		hash, err := bcrypt.GenerateFromPassword([]byte("admin12345"), bcrypt.DefaultCost)
+		hash, err := bcrypt.GenerateFromPassword([]byte(config.AppConfig.BootstrapAdminPassword), bcrypt.DefaultCost)
 		if err == nil {
 			now := time.Now().UTC()
 			adminUser := model.User{

@@ -3,6 +3,7 @@ package database
 import (
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"modalin-be/internal/model"
@@ -28,9 +29,7 @@ func ConnectDB() {
 		cfg.DBTimeZone,
 	)
 
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
-	})
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(databaseLogMode(cfg.AppEnv))})
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
@@ -46,10 +45,36 @@ func ConnectDB() {
 	sqlDB.SetConnMaxLifetime(time.Hour)
 
 	log.Println("Database connection successfully established!")
+	DB = db
+}
 
-	// Run AutoMigrate for all 24 tables
+func databaseLogMode(appEnv string) logger.LogLevel {
+	if strings.EqualFold(strings.TrimSpace(appEnv), "production") {
+		return logger.Warn
+	}
+	return logger.Info
+}
+
+func CloseDB() error {
+	if DB == nil {
+		return nil
+	}
+	sqlDB, err := DB.DB()
+	if err != nil {
+		return err
+	}
+	return sqlDB.Close()
+}
+
+// MigrateDB performs schema changes explicitly. It must be run as a separate
+// deployment step, never implicitly when an API instance starts.
+func MigrateDB() error {
+	if DB == nil {
+		return fmt.Errorf("database connection has not been initialized")
+	}
+	db := DB
 	log.Println("Running database migrations...")
-	err = db.AutoMigrate(
+	if err := db.AutoMigrate(
 		&model.User{},
 		&model.Role{},
 		&model.UserRole{},
@@ -79,9 +104,8 @@ func ConnectDB() {
 		&model.AuditLog{},
 		&model.StarterBusinessDetail{},
 		&model.RepaymentRestructuringRequest{},
-	)
-	if err != nil {
-		log.Fatalf("Failed to run database migrations: %v", err)
+	); err != nil {
+		return fmt.Errorf("auto migrate schema: %w", err)
 	}
 	// Campaigns created before priority levels were introduced require borrower revision.
 	if err := db.Exec(`UPDATE loan_campaigns SET status = 'needs_revision'
@@ -89,23 +113,22 @@ func ConnectDB() {
 		AND EXISTS (SELECT 1 FROM campaign_budget_items
 			WHERE campaign_budget_items.campaign_id = loan_campaigns.id
 			AND (priority_level IS NULL OR priority_level NOT IN ('high', 'medium', 'low')))`).Error; err != nil {
-		log.Fatalf("Failed to mark legacy campaigns for revision: %v", err)
+		return fmt.Errorf("mark legacy campaigns for revision: %w", err)
 	}
 	// GORM cannot express PostgreSQL partial unique indexes. This allows a user to
 	// keep historical inactive businesses while enforcing exactly one active business.
 	if err := db.Exec("DROP INDEX IF EXISTS idx_businesses_user_id").Error; err != nil {
-		log.Fatalf("Failed to replace business user index: %v", err)
+		return fmt.Errorf("replace business user index: %w", err)
 	}
 	if err := db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_businesses_one_active_per_user ON businesses (user_id) WHERE status = 'active'").Error; err != nil {
-		log.Fatalf("Failed to create active business uniqueness index: %v", err)
+		return fmt.Errorf("create active business uniqueness index: %w", err)
 	}
 	if err := runApplicationMigrations(db); err != nil {
-		log.Fatalf("Failed to run application migrations: %v", err)
+		return fmt.Errorf("run application migrations: %w", err)
 	}
 	log.Println("Database migrations completed successfully!")
 
 	// Run Master Data Seeder
 	SeedData(db)
-
-	DB = db
+	return nil
 }

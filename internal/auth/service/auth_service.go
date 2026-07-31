@@ -16,21 +16,22 @@ import (
 )
 
 var (
-	ErrTermsNotAccepted        = errors.New("terms must be accepted")
-	ErrInvalidCredentials      = errors.New("invalid credentials")
-	ErrPasswordLength          = errors.New("password must be between 8 and 72 characters")
-	ErrUserInactive            = errors.New("user is not active")
-	ErrEmailTaken              = errors.New("email already registered")
-	ErrInvalidRole             = errors.New("role cannot be requested")
-	ErrRoleRequestExists       = errors.New("role request already open")
-	ErrIdentityCardRequired    = errors.New("identity card photo is required for this role")
-	ErrRiskAgreementRequired   = errors.New("risk agreement must be accepted for lender role")
-	ErrEthicsAgreementRequired = errors.New("ethics agreement must be accepted for verifier role")
-	ErrTrainingRequired        = errors.New("mini-training must be completed for verifier role")
-	ErrRoleRequestNotFound     = errors.New("role request not found")
-	ErrInvalidAction           = errors.New("invalid review action")
-	ErrInvalidTempToken        = errors.New("invalid or expired temporary registration token")
-	ErrGoogleAuthFailed        = errors.New("invalid google auth credentials")
+	ErrTermsNotAccepted          = errors.New("terms must be accepted")
+	ErrInvalidCredentials        = errors.New("invalid credentials")
+	ErrPasswordLength            = errors.New("password must be between 8 and 72 characters")
+	ErrUserInactive              = errors.New("user is not active")
+	ErrEmailTaken                = errors.New("email already registered")
+	ErrInvalidRole               = errors.New("role cannot be requested")
+	ErrRoleRequestExists         = errors.New("role request already open")
+	ErrIdentityCardRequired      = errors.New("identity card photo is required for this role")
+	ErrRiskAgreementRequired     = errors.New("risk agreement must be accepted for lender role")
+	ErrEthicsAgreementRequired   = errors.New("ethics agreement must be accepted for verifier role")
+	ErrTrainingRequired          = errors.New("mini-training must be completed for verifier role")
+	ErrRoleRequestNotFound       = errors.New("role request not found")
+	ErrInvalidAction             = errors.New("invalid review action")
+	ErrInvalidTempToken          = errors.New("invalid or expired temporary registration token")
+	ErrGoogleAuthFailed          = errors.New("invalid google auth credentials")
+	ErrGoogleAccountLinkRequired = errors.New("google account must be linked from an authenticated session")
 )
 
 type RegisterInput struct {
@@ -75,6 +76,19 @@ type GoogleAuthResult struct {
 	LoginResult *LoginResult   `json:"login_result,omitempty"`
 }
 
+// GoogleIdentity is extracted exclusively from a Google ID token that has
+// already been validated by GoogleTokenVerifier.
+type GoogleIdentity struct {
+	Subject       string
+	Email         string
+	FullName      string
+	EmailVerified bool
+}
+
+type GoogleTokenVerifier interface {
+	Verify(ctx context.Context, rawIDToken string) (GoogleIdentity, error)
+}
+
 type CompleteGoogleRegistrationInput struct {
 	TempToken     string `json:"temp_token"`
 	Phone         string `json:"phone"`
@@ -84,12 +98,17 @@ type CompleteGoogleRegistrationInput struct {
 }
 
 type AuthService struct {
-	repo   repository.Repository
-	secret []byte
+	repo           repository.Repository
+	secret         []byte
+	googleVerifier GoogleTokenVerifier
 }
 
 func NewAuthService(repo repository.Repository, secret string) *AuthService {
 	return &AuthService{repo: repo, secret: []byte(secret)}
+}
+
+func NewAuthServiceWithGoogleVerifier(repo repository.Repository, secret string, verifier GoogleTokenVerifier) *AuthService {
+	return &AuthService{repo: repo, secret: []byte(secret), googleVerifier: verifier}
 }
 
 func (s *AuthService) Register(ctx context.Context, in RegisterInput) (*model.User, error) {
@@ -141,15 +160,21 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (*Login
 	if err != nil {
 		return nil, err
 	}
-	return s.issueToken(user.ID, roles)
+	return s.issueToken(user.ID, roles, user.TokenVersion)
 }
 
-func (s *AuthService) GoogleAuth(ctx context.Context, googleID, email, fullName string) (*GoogleAuthResult, error) {
-	googleID = strings.TrimSpace(googleID)
-	email = strings.ToLower(strings.TrimSpace(email))
-	fullName = strings.TrimSpace(fullName)
-
-	if googleID == "" || email == "" {
+func (s *AuthService) GoogleAuth(ctx context.Context, rawIDToken string) (*GoogleAuthResult, error) {
+	if s.googleVerifier == nil || strings.TrimSpace(rawIDToken) == "" {
+		return nil, ErrGoogleAuthFailed
+	}
+	identity, err := s.googleVerifier.Verify(ctx, rawIDToken)
+	if err != nil {
+		return nil, ErrGoogleAuthFailed
+	}
+	googleID := strings.TrimSpace(identity.Subject)
+	email := strings.ToLower(strings.TrimSpace(identity.Email))
+	fullName := strings.TrimSpace(identity.FullName)
+	if googleID == "" || email == "" || !identity.EmailVerified {
 		return nil, ErrGoogleAuthFailed
 	}
 
@@ -163,7 +188,7 @@ func (s *AuthService) GoogleAuth(ctx context.Context, googleID, email, fullName 
 		if err != nil {
 			return nil, err
 		}
-		loginRes, err := s.issueToken(user.ID, roles)
+		loginRes, err := s.issueToken(user.ID, roles, user.TokenVersion)
 		if err != nil {
 			return nil, err
 		}
@@ -173,20 +198,10 @@ func (s *AuthService) GoogleAuth(ctx context.Context, googleID, email, fullName 
 	// 2. Try finding user by Email
 	user, err = s.repo.FindUserByEmail(ctx, email)
 	if err == nil {
-		if user.Status != "active" {
-			return nil, ErrUserInactive
-		}
-		user.GoogleID = &googleID
-		_ = s.repo.CreateUser(ctx, user)
-		roles, err := s.repo.GetApprovedRoles(ctx, user.ID)
-		if err != nil {
-			return nil, err
-		}
-		loginRes, err := s.issueToken(user.ID, roles)
-		if err != nil {
-			return nil, err
-		}
-		return &GoogleAuthResult{IsNewUser: false, LoginResult: loginRes}, nil
+		return nil, ErrGoogleAccountLinkRequired
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
 	}
 
 	// 3. New User - Issue temporary token for 2-step onboarding
@@ -253,7 +268,7 @@ func (s *AuthService) CompleteGoogleRegistration(ctx context.Context, in Complet
 		return nil, err
 	}
 
-	return s.issueToken(user.ID, roles)
+	return s.issueToken(user.ID, roles, user.TokenVersion)
 }
 
 func (s *AuthService) Profile(ctx context.Context, id uuid.UUID) (*Profile, error) {
@@ -269,6 +284,13 @@ func (s *AuthService) Profile(ctx context.Context, id uuid.UUID) (*Profile, erro
 		return nil, err
 	}
 	return &Profile{User: user, Roles: roles}, nil
+}
+
+// GetAuthorizationState satisfies middleware.AuthorizationStateReader. It
+// makes account blocks, role changes, and token-version revocation effective
+// immediately instead of waiting for JWT expiry.
+func (s *AuthService) GetAuthorizationState(ctx context.Context, id uuid.UUID) (string, uint64, []string, error) {
+	return s.repo.GetAuthorizationState(ctx, id)
 }
 
 func (s *AuthService) RequestRole(ctx context.Context, userID uuid.UUID, in RequestRoleInput) (*model.RoleRequest, error) {
@@ -381,10 +403,13 @@ func (s *AuthService) ReviewRoleRequest(ctx context.Context, adminID uuid.UUID, 
 	return req, nil
 }
 
-func (s *AuthService) issueToken(userID uuid.UUID, roles []string) (*LoginResult, error) {
+func (s *AuthService) issueToken(userID uuid.UUID, roles []string, tokenVersion uint64) (*LoginResult, error) {
 	now := time.Now().UTC()
 	expires := now.Add(24 * time.Hour)
-	claims := jwt.MapClaims{"user_id": userID.String(), "roles": roles, "iss": "modalin-be", "iat": now.Unix(), "exp": expires.Unix()}
+	if tokenVersion < 1 {
+		tokenVersion = 1
+	}
+	claims := jwt.MapClaims{"user_id": userID.String(), "roles": roles, "token_version": tokenVersion, "iss": "modalin-be", "iat": now.Unix(), "exp": expires.Unix()}
 	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(s.secret)
 	if err != nil {
 		return nil, err

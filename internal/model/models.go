@@ -17,6 +17,7 @@ type User struct {
 	City            string         `gorm:"type:varchar(100);not null"`
 	Address         string         `gorm:"type:text;not null"`
 	Status          string         `gorm:"type:varchar(50);default:'active';not null"` // active, suspended, blocked
+	TokenVersion    uint64         `gorm:"type:bigint;not null;default:1" json:"-"`
 	GoogleID        *string        `gorm:"type:varchar(255);uniqueIndex"`
 	TermsAcceptedAt *time.Time     `gorm:"type:timestamp"`
 	TermsVersion    string         `gorm:"type:varchar(50)"`
@@ -749,16 +750,18 @@ func (ra *RiskAssessment) BeforeCreate(tx *gorm.DB) (err error) {
 
 // 23. Dispute
 type Dispute struct {
-	ID           uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
-	CampaignID   uuid.UUID      `gorm:"type:uuid;index;not null"`
-	ReportedBy   uuid.UUID      `gorm:"type:uuid;index;not null"`
-	TargetUserID *uuid.UUID     `gorm:"type:uuid;index"`
-	Type         string         `gorm:"type:varchar(100);not null"` // fraud_suspected, late_payment, invalid_proof, misuse_of_funds, other
-	Description  string         `gorm:"type:text;not null"`
-	Status       string         `gorm:"type:varchar(50);default:'open';not null"` // open, under_review, resolved, rejected
-	ResolvedBy   *uuid.UUID     `gorm:"type:uuid;index"`
-	CreatedAt    time.Time      `gorm:"not null"`
-	DeletedAt    gorm.DeletedAt `gorm:"index"`
+	ID             uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	CampaignID     uuid.UUID      `gorm:"type:uuid;index;not null"`
+	ReportedBy     uuid.UUID      `gorm:"type:uuid;index;not null"`
+	TargetUserID   *uuid.UUID     `gorm:"type:uuid;index"`
+	Type           string         `gorm:"type:varchar(100);not null"` // fraud_suspected, late_payment, invalid_proof, misuse_of_funds, other
+	Description    string         `gorm:"type:text;not null"`
+	Status         string         `gorm:"type:varchar(50);default:'open';not null"` // open, under_review, resolved, rejected
+	ResolvedBy     *uuid.UUID     `gorm:"type:uuid;index"`
+	ResolutionNote *string        `gorm:"type:text"`
+	ResolvedAt     *time.Time     `gorm:"type:timestamp"`
+	CreatedAt      time.Time      `gorm:"not null"`
+	DeletedAt      gorm.DeletedAt `gorm:"index"`
 
 	// Relations
 	Campaign LoanCampaign `gorm:"foreignKey:CampaignID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
@@ -781,6 +784,8 @@ func (d *Dispute) BeforeCreate(tx *gorm.DB) (err error) {
 // 24. AuditLog
 type AuditLog struct {
 	ID         uuid.UUID  `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	EventID    uuid.UUID  `gorm:"type:uuid;index"`
+	RequestID  *string    `gorm:"type:varchar(100);index"`
 	UserID     *uuid.UUID `gorm:"type:uuid;index"`
 	Action     string     `gorm:"type:varchar(255);not null"`
 	EntityType string     `gorm:"type:varchar(100);not null"`
@@ -800,6 +805,9 @@ func (AuditLog) TableName() string {
 func (al *AuditLog) BeforeCreate(tx *gorm.DB) (err error) {
 	if al.ID == uuid.Nil {
 		al.ID = uuid.New()
+	}
+	if al.EventID == uuid.Nil {
+		al.EventID = uuid.New()
 	}
 	return
 }
@@ -836,8 +844,12 @@ func (sbd *StarterBusinessDetail) BeforeCreate(tx *gorm.DB) (err error) {
 type RepaymentRestructuringRequest struct {
 	ID                  uuid.UUID      `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
 	CampaignID          uuid.UUID      `gorm:"type:uuid;index;not null"`
-	Reason              string         `gorm:"type:text;not null"`                          // Alasan pengajuan
-	ProposedTenorMonths int            `gorm:"type:int;not null"`                           // Tenor baru yang diusulkan
+	RequestedBy         uuid.UUID      `gorm:"type:uuid;index"`
+	Reason              string         `gorm:"type:text;not null"` // Alasan pengajuan
+	ProposedTenorMonths int            `gorm:"type:int;not null"`  // Tenor baru yang diusulkan
+	PreviousTenorMonths int            `gorm:"type:int"`
+	RemainingPrincipal  int64          `gorm:"type:bigint"`
+	RemainingMargin     int64          `gorm:"type:bigint"`
 	ProofURL            *string        `gorm:"type:text"`                                   // Foto / dokumen bukti kondisi usaha saat ini
 	Status              string         `gorm:"type:varchar(50);default:'pending';not null"` // pending, approved, rejected
 	AdminNote           *string        `gorm:"type:text"`                                   // Catatan tinjauan admin
@@ -848,8 +860,9 @@ type RepaymentRestructuringRequest struct {
 	DeletedAt           gorm.DeletedAt `gorm:"index"`
 
 	// Relations
-	Campaign LoanCampaign `gorm:"foreignKey:CampaignID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
-	Approver *User        `gorm:"foreignKey:ApprovedBy;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;"`
+	Campaign  LoanCampaign `gorm:"foreignKey:CampaignID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
+	Requester User         `gorm:"foreignKey:RequestedBy;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;"`
+	Approver  *User        `gorm:"foreignKey:ApprovedBy;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;"`
 }
 
 func (RepaymentRestructuringRequest) TableName() string {
