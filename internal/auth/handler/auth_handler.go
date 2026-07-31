@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"strings"
 
 	"modalin-be/internal/auth/service"
 
@@ -74,12 +75,24 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 
 func (h *AuthHandler) GoogleAuth(c *fiber.Ctx) error {
 	var req struct {
-		IDToken string `json:"id_token"`
+		IDToken    string `json:"id_token"`
+		Credential string `json:"credential"`
+		Token      string `json:"token"`
 	}
-	if err := c.BodyParser(&req); err != nil || req.IDToken == "" {
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid request body"})
+	}
+	token := strings.TrimSpace(req.IDToken)
+	if token == "" {
+		token = strings.TrimSpace(req.Credential)
+	}
+	if token == "" {
+		token = strings.TrimSpace(req.Token)
+	}
+	if token == "" {
 		return c.Status(400).JSON(fiber.Map{"error": "id_token is required"})
 	}
-	res, err := h.service.GoogleAuth(c.Context(), req.IDToken)
+	res, err := h.service.GoogleAuth(c.Context(), token)
 	if err != nil {
 		if errors.Is(err, service.ErrUserInactive) {
 			return c.Status(403).JSON(fiber.Map{"error": "account is not active"})
