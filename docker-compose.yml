@@ -23,8 +23,10 @@ services:
     restart: on-failure
     ports:
       - "127.0.0.1:8080:8080"
+    env_file:
+      - configs/.env
     environment:
-      APP_ENV: production
+      APP_ENV: ${APP_ENV:-production}
       PORT: 8080
       DB_HOST: db
       DB_PORT: 5432
@@ -36,6 +38,12 @@ services:
       UPLOAD_DIR: /app/uploads
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in your environment or configs/.env}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?set CORS_ALLOWED_ORIGINS in your environment or configs/.env}
+      GOOGLE_OAUTH_CLIENT_IDS: ${GOOGLE_OAUTH_CLIENT_IDS:-}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+      XENDIT_SECRET_KEY: ${XENDIT_SECRET_KEY:-}
+      XENDIT_WEBHOOK_VERIFICATION_TOKEN: ${XENDIT_WEBHOOK_VERIFICATION_TOKEN:-}
+      XENDIT_MODE: ${XENDIT_MODE:-sandbox}
     depends_on:
       db:
         condition: service_healthy
@@ -48,8 +56,10 @@ services:
       dockerfile: Dockerfile
     profiles: [ "migrate" ]
     command: [ "./migrate" ]
+    env_file:
+      - configs/.env
     environment:
-      APP_ENV: production
+      APP_ENV: ${APP_ENV:-production}
       DB_HOST: db
       DB_PORT: 5432
       DB_USER: postgres
@@ -59,6 +69,12 @@ services:
       DB_TIMEZONE: Asia/Jakarta
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in your environment or configs/.env}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?set CORS_ALLOWED_ORIGINS in your environment or configs/.env}
+      GOOGLE_OAUTH_CLIENT_IDS: ${GOOGLE_OAUTH_CLIENT_IDS:-}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+      XENDIT_SECRET_KEY: ${XENDIT_SECRET_KEY:-}
+      XENDIT_WEBHOOK_VERIFICATION_TOKEN: ${XENDIT_WEBHOOK_VERIFICATION_TOKEN:-}
+      XENDIT_MODE: ${XENDIT_MODE:-sandbox}
     depends_on:
       db:
         condition: service_healthy
