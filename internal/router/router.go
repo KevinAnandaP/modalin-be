@@ -19,6 +19,8 @@ import (
 	disputeRepository "modalin-be/internal/dispute/repository"
 	disputeService "modalin-be/internal/dispute/service"
 	healthHandler "modalin-be/internal/health/handler"
+	paymentHandler "modalin-be/internal/payment/handler"
+	paymentService "modalin-be/internal/payment/service"
 	restructuringHandler "modalin-be/internal/restructuring/handler"
 	restructuringRepository "modalin-be/internal/restructuring/repository"
 	restructuringService "modalin-be/internal/restructuring/service"
@@ -28,6 +30,7 @@ import (
 	"modalin-be/pkg/config"
 	"modalin-be/pkg/database"
 	"modalin-be/pkg/middleware"
+	"modalin-be/pkg/xendit"
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -48,7 +51,16 @@ func SetupRoutes(app *fiber.App) {
 	authenticated := middleware.JWTProtected(config.AppConfig.JWTSecret, authSvc)
 	verificationSvc := verificationService.New(verificationRepository.New(database.DB))
 	business := businessHandler.NewBusinessHandler(businessService.NewBusinessService(businessRepository.NewBusinessRepository(database.DB), verificationSvc.RefreshBusinessRisk), businessStorage.NewLocalProofStorage(config.AppConfig.UploadDir, "/uploads"))
-	campaign := campaignHandler.NewCampaignHandler(campaignService.NewCampaignService(campaignRepository.NewCampaignRepository(database.DB), verificationSvc.RefreshCampaignRisk), campaignStorage.NewLocalProofStorage(config.AppConfig.UploadDir, "/uploads"))
+	
+	// Xendit Payment Client & Service
+	xenditClient := xendit.NewClient(config.AppConfig.XenditSecretKey, config.AppConfig.XenditWebhookToken)
+	xenditSvc := paymentService.NewXenditPaymentService(database.DB)
+	webhook := paymentHandler.NewWebhookHandler(xenditSvc, xenditClient)
+
+	campaignSvc := campaignService.NewCampaignService(campaignRepository.NewCampaignRepository(database.DB), verificationSvc.RefreshCampaignRisk)
+	campaignSvc.SetXenditClient(xenditClient)
+
+	campaign := campaignHandler.NewCampaignHandler(campaignSvc, campaignStorage.NewLocalProofStorage(config.AppConfig.UploadDir, "/uploads"))
 	verification := verificationHandler.New(verificationSvc, campaignStorage.NewLocalProofStorage(config.AppConfig.UploadDir, "/uploads"))
 	audit := auditHandler.New(auditService.New(auditRepository.New(database.DB)))
 	dispute := disputeHandler.New(disputeService.New(disputeRepository.New(database.DB)))
@@ -62,6 +74,9 @@ func SetupRoutes(app *fiber.App) {
 	// API group for future endpoints
 	api := app.Group("/api")
 	v1 := api.Group("/v1")
+
+	// Xendit Public Webhook Endpoint
+	v1.Post("/webhooks/xendit", webhook.HandleXenditCallback)
 
 	// Register API v1 Routes
 	v1.Get("/health", health.Live)

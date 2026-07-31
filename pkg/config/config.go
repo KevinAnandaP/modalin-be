@@ -26,6 +26,9 @@ type Config struct {
 	GoogleOAuthClientIDs   []string
 	BootstrapAdminEmail    string
 	BootstrapAdminPassword string
+	XenditSecretKey        string
+	XenditWebhookToken     string
+	XenditMode             string
 }
 
 var AppConfig *Config
@@ -53,6 +56,9 @@ func LoadConfig() {
 		GoogleOAuthClientIDs:   splitCSV(getEnv("GOOGLE_OAUTH_CLIENT_IDS", "")),
 		BootstrapAdminEmail:    strings.TrimSpace(getEnv("BOOTSTRAP_ADMIN_EMAIL", "")),
 		BootstrapAdminPassword: getEnv("BOOTSTRAP_ADMIN_PASSWORD", ""),
+		XenditSecretKey:        getEnv("XENDIT_SECRET_KEY", ""),
+		XenditWebhookToken:     getEnv("XENDIT_WEBHOOK_VERIFICATION_TOKEN", ""),
+		XenditMode:             getEnv("XENDIT_MODE", "sandbox"),
 	}
 }
 

@@ -41,6 +41,7 @@ type Repository interface {
 	ListMilestones(context.Context, uuid.UUID) ([]model.CampaignMilestone, error)
 	ReplaceMilestones(context.Context, uuid.UUID, []model.CampaignMilestone) error
 	CreateFunding(context.Context, *model.Funding) error
+	UpdateFunding(context.Context, *model.Funding) error
 	CreateDisbursement(context.Context, *model.Disbursement) error
 	GetDisbursement(context.Context, uuid.UUID) (*model.Disbursement, error)
 	GetDisbursementForUpdate(context.Context, uuid.UUID) (*model.Disbursement, error)
@@ -189,6 +190,9 @@ func (r *CampaignRepository) ReplaceMilestones(ctx context.Context, campaignID u
 }
 func (r *CampaignRepository) CreateFunding(ctx context.Context, funding *model.Funding) error {
 	return r.db.WithContext(ctx).Create(funding).Error
+}
+func (r *CampaignRepository) UpdateFunding(ctx context.Context, funding *model.Funding) error {
+	return r.db.WithContext(ctx).Save(funding).Error
 }
 func (r *CampaignRepository) CreateDisbursement(ctx context.Context, disbursement *model.Disbursement) error {
 	return r.db.WithContext(ctx).Create(disbursement).Error
